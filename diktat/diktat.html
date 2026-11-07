@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline-Diktat</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --panel: #ffffff;
+    --text: #1d1d1b;
+    --muted: #6b6a66;
+    --line: #e2e0da;
+    --accent: #c2410c;
+    --accent-text: #ffffff;
+    --ok: #15803d;
+    --warn: #b45309;
+    --err: #b91c1c;
+    --field: #fbfaf8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161614;
+      --panel: #1f1f1d;
+      --text: #ecebe7;
+      --muted: #a09e98;
+      --line: #34332f;
+      --accent: #f97316;
+      --accent-text: #1a1206;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --err: #f87171;
+      --field: #191917;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161614; --panel: #1f1f1d; --text: #ecebe7; --muted: #a09e98; --line: #34332f;
+    --accent: #f97316; --accent-text: #1a1206; --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --field: #191917;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 1.5rem; margin: 0; letter-spacing: -0.01em; }
+  .status { font-size: .9rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); }
+  .dot.rec { background: var(--err); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); }
+  select, button { font: inherit; }
+  select { background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  button {
+    background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+
+  .recbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  #recBtn { min-width: 190px; padding: 14px 20px; font-size: 1.05rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+  #recBtn.recording { background: var(--err); border-color: var(--err); color: #fff; }
+  .meter { flex: 1; min-width: 120px; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .meter > div { height: 100%; width: 0%; background: var(--ok); transition: width 80ms linear; }
+  .meter > div.voice { background: var(--accent); }
+  #queueInfo { font-size: .9rem; color: var(--muted); min-height: 1.5em; }
+
+  textarea {
+    width: 100%; min-height: 340px; resize: vertical; padding: 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--field); color: var(--text);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .actions .spacer { flex: 1; }
+  .small { font-size: .85rem; color: var(--muted); }
+
+  details summary { cursor: pointer; font-weight: 600; }
+  .filelist { list-style: none; padding: 0; margin: 10px 0; }
+  .filelist li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  .ok-t { color: var(--ok); } .err-t { color: var(--err); } .warn-t { color: var(--warn); }
+  .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
+  .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width 150ms; }
+  #setupMsg { margin-top: 8px; white-space: pre-line; }
+  kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: .85em; }
+  ul.help { margin: 8px 0 0; padding-left: 20px; }
+  input[type=file] { display: none; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>🎙️ Offline-Diktat</h1>
+    <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Starte …</span></div>
+  </header>
+
+  <!-- Einrichtung -->
+  <section class="panel" id="setupPanel">
+    <details id="setupDetails">
+      <summary>Einrichtung &amp; Offline-Paket</summary>
+      <p class="small">
+        Die Spracherkennung (Whisper) läuft komplett in diesem Browser. Es wird nichts hochgeladen.
+        Die nötigen Dateien braucht es nur <b>einmal</b>. Danach liegen sie im Browserspeicher und alles funktioniert ohne Internet.
+      </p>
+      <ul class="filelist" id="fileList"></ul>
+      <div class="row">
+        <button class="primary" id="downloadBtn">Einmalig herunterladen (Internet nötig)</button>
+        <button id="folderBtn">Offline-Paket-Ordner laden …</button>
+        <button id="exportBtn" title="Speichert alle Dateien als Ordner, z. B. auf einen USB-Stick">Offline-Paket speichern …</button>
+        <input type="file" id="folderInput" webkitdirectory directory multiple>
+      </div>
+      <div class="progress" id="progress"><div></div></div>
+      <div id="setupMsg" class="small"></div>
+    </details>
+  </section>
+
+  <!-- Einstellungen + Aufnahme -->
+  <section class="panel">
+    <div class="row" style="margin-bottom:14px">
+      <label class="field">Modell
+        <select id="modelSel">
+          <optgroup label="Whisper (OpenAI)">
+            <option value="Xenova/whisper-tiny">Whisper Tiny – schnell, ungenauer (≈ 40 MB)</option>
+            <option value="Xenova/whisper-base" selected>Whisper Base – Standard (≈ 80 MB)</option>
+            <option value="Xenova/whisper-small">Whisper Small – genauer, langsamer (≈ 250 MB)</option>
+          </optgroup>
+          <optgroup label="Parakeet v3 (NVIDIA)">
+            <option value="parakeet:cpu">Parakeet v3 CPU – sehr genau (≈ 700 MB)</option>
+            <option value="parakeet:gpu">Parakeet v3 GPU – schnell mit Grafikkarte, experimentell (≈ 2,5 GB)</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="field" id="langField">Sprache
+        <select id="langSel">
+          <option value="german" selected>Deutsch</option>
+          <option value="english">Englisch</option>
+          <option value="auto">Automatisch erkennen</option>
+        </select>
+      </label>
+      <label class="check" title="„Komma“, „Punkt“, „Fragezeichen“ … werden zu Satzzeichen">
+        <input type="checkbox" id="punctCmds"> Satzzeichen per Sprachbefehl
+      </label>
+    </div>
+    <div class="recbar">
+      <button id="recBtn" class="primary" disabled><span id="recIcon">●</span> <span id="recLabel">Diktat starten</span></button>
+      <div class="meter" title="Mikrofonpegel"><div id="meterBar"></div></div>
+    </div>
+    <div id="queueInfo"></div>
+  </section>
+
+  <!-- Text -->
+  <section class="panel">
+    <textarea id="text" placeholder="Hier erscheint dein diktierter Text. Du kannst ihn jederzeit bearbeiten. Neuer Text wird an der Cursor-Position eingefügt."></textarea>
+    <div class="actions">
+      <button id="copyBtn">📋 Kopieren</button>
+      <button id="saveBtn">💾 Als .txt speichern</button>
+      <span class="spacer"></span>
+      <button id="clearBtn">🗑️ Leeren</button>
+    </div>
+    <details style="margin-top:12px">
+      <summary class="small">Tipps &amp; Sprachbefehle</summary>
+      <ul class="help small">
+        <li>Sprich in ganzen Sätzen und mach kurze Pausen. Nach jeder Pause wird der Abschnitt erkannt und eingefügt.</li>
+        <li><b>„neue Zeile“</b> fügt einen Zeilenumbruch ein, <b>„neuer Absatz“</b> eine Leerzeile.</li>
+        <li>Mit aktivierten Satzzeichen-Befehlen: „Komma“, „Punkt“, „Fragezeichen“, „Ausrufezeichen“, „Doppelpunkt“.</li>
+        <li>Tastenkürzel: <kbd>Strg</kbd> + <kbd>Leertaste</kbd> startet/stoppt das Diktat.</li>
+        <li>Der Text wird automatisch in diesem Browser zwischengespeichert.</li>
+      </ul>
+    </details>
+  </section>
+  <p class="small">Läuft am besten in Chrome oder Edge. Alle Daten bleiben auf diesem Gerät.</p>
+</main>
+
+<!-- ===================== parakeet.js 1.4.4 (MIT, (c) 2025 Yunus Seyhan Dede, https://github.com/ysdede/parakeet.js) =====================
+     Mit esbuild gebündelt und minimiert; "onnxruntime-web" wird zur Laufzeit über globalThis.__ORT_MODULE__ bereitgestellt. -->
+<script type="text/plain" id="parakeetLib">var ts=Object.defineProperty;var ss=(t,e,s)=>()=>{if(s)throw s[0];try{return t&&(e=t(t=0)),e}catch(n){throw s=[n],n}};var ns=(t,e)=>{for(var s in e)ts(t,s,{get:e[s],enumerable:!0})};var bt={};ns(bt,{default:()=>rs});var os,rs,kt=ss(()=>{os=globalThis.__ORT_MODULE__,rs=os});async function Le({backend:t="webgpu",wasmPaths:e,numThreads:s}={}){let n;try{let o=await Promise.resolve().then(()=>(kt(),bt));n=o.default||o,console.log("[Parakeet.js] ORT structure:",{hasDefault:!!o.default,hasEnv:!!n.env,hasWasm:!!n.env?.wasm,hasWebgpu:!!n.env?.webgpu,keys:Object.keys(n).slice(0,10)}),n.env||(console.log("[Parakeet.js] Trying alternative access patterns..."),console.log("[Parakeet.js] ortModule keys:",Object.keys(o)),o.ort&&(n=o.ort,console.log("[Parakeet.js] Found ort in ortModule.ort")))}catch(o){throw console.error("[Parakeet.js] Failed to import onnxruntime-web:",o),new Error("Failed to load ONNX Runtime Web. Please check your network connection.")}if(!n||!n.env)throw new Error("ONNX Runtime Web loaded but env is not available. This might be a bundling issue.");if(!n.env.wasm.wasmPaths){let r=n.env.versions?.common||"1.24.1";n.env.versions?.common||console.warn("Parakeet.js: Could not auto-detect onnxruntime-web version. Using fallback version; set ort.env.wasm.wasmPaths manually for best results."),n.env.wasm.wasmPaths=`https://cdn.jsdelivr.net/npm/onnxruntime-web@${r}/dist/`}if((t==="wasm"||t==="webgpu")&&(typeof SharedArrayBuffer<"u"?(n.env.wasm.numThreads=s||navigator.hardwareConcurrency||4,n.env.wasm.simd=!0,console.log(`[Parakeet.js] WASM configured with ${n.env.wasm.numThreads} threads, SIMD enabled`)):(console.warn("[Parakeet.js] SharedArrayBuffer not available - using single-threaded WASM"),n.env.wasm.numThreads=1),n.env.wasm.proxy=!1),t==="webgpu"){let o="gpu"in navigator;if(console.log(`[Parakeet.js] WebGPU supported: ${o}`),o)try{console.log("[Parakeet.js] WebGPU will be initialized automatically when creating session")}catch(r){console.warn("[Parakeet.js] WebGPU initialization failed:",r),console.warn("[Parakeet.js] Falling back to WASM"),t="wasm"}else console.warn("[Parakeet.js] WebGPU not supported \u2013 falling back to WASM"),t="wasm"}return typeof globalThis<"u"&&(globalThis.ort=n),n}async function is(t){let e=await fetch(t);if(!e.ok)throw new Error(`Failed to fetch ${t}: ${e.status}`);return e.text()}var De=class t{constructor(e){this.id2token=e,this.blankToken="<blk>",this.blankId=e.findIndex(s=>s==="<blk>"),this.blankId===-1&&(console.warn("[ParakeetTokenizer] Blank token <blk> not found in vocabulary, defaulting to 1024"),this.blankId=1024),this.sanitizedTokens=this.id2token.map(s=>s&&s.replace(/\u2581/g," "))}static async fromUrl(e){let n=(await is(e)).split(/\r?\n/).filter(Boolean),o=[];for(let r of n){let[i,a]=r.split(/\s+/),c=parseInt(a,10);if(isNaN(c)||!i){console.warn(`[ParakeetTokenizer] Skipping invalid vocab line: ${JSON.stringify(r)}`);continue}o[c]=i}return new t(o)}decode(e){let s=[];for(let o of e){if(o===this.blankId)continue;let r=this.sanitizedTokens[o];r!==void 0&&s.push(r)}let n=s.join("");return n=n.replace(/^\s+/,""),n=n.replace(/\s+(?=[^\w\s])/g,""),n=n.replace(/\s+/g," "),n.trim()}};var Re=class{constructor(e,s={}){this.modelUrl=e,this.opts=s,this.opts.enableGraphCapture===void 0&&(this.opts.enableGraphCapture=this.opts.backend==="wasm"),this.session=null,this.ort=null,this._sessionPromise=null}async _ensureSession(){if(!this.session){if(this._sessionPromise){await this._sessionPromise;return}this._sessionPromise=(async()=>{this.ort=await Le(this.opts);let e=this.opts.enableGraphCapture?{enableProfiling:this.opts.enableProfiling||!1,enableGraphCapture:!0}:{enableProfiling:this.opts.enableProfiling||!1},s=async()=>{try{return await this.ort.InferenceSession.create(this.modelUrl,e)}catch(n){let o=(n.message||"")+"";if(e.enableGraphCapture&&o.includes("graph capture"))return console.warn("[Preprocessor] Graph capture unsupported, retrying without it"),await this.ort.InferenceSession.create(this.modelUrl,{...e,enableGraphCapture:!1});throw n}};this.session=await s()})();try{await this._sessionPromise}catch(e){throw this._sessionPromise=null,e}finally{this.session&&(this._sessionPromise=null)}}}async process(e){await this._ensureSession();let s;e instanceof Float32Array?s=e.byteOffset===0&&e.buffer.byteLength===e.byteLength?e:new Float32Array(e):s=new Float32Array(e);let n=new this.ort.Tensor("float32",s,[1,s.length]),o=new BigInt64Array([BigInt(s.length)]),r=new this.ort.Tensor("int64",o,[1]),i={waveforms:n,waveforms_lens:r},a=await this.session.run(i),c=a.features,d=a.features_lens,l=new Float32Array(c.data),h=Number(d.data[0]);return n.dispose?.(),r.dispose?.(),c.dispose?.(),d.dispose?.(),{features:l,length:h}}};var Mt=5960464477539063e-23,Y=257,ze=Math.SQRT1_2,Tt=new Map,St=new Map,Je=null,tt=200/3,$e=1e3,Ze=$e/tt,xt=Math.log(6.4)/27;function Ye(t){return t>=$e?Ze+Math.log(t/$e)/xt:t/tt}function Ft(t){return t>=Ze?$e*Math.exp(xt*(t-Ze)):t*tt}function yt(t){let n=new Float64Array(Y);for(let l=0;l<Y;l++)n[l]=8e3*l/(Y-1);let o=Ye(0),r=Ye(8e3),i=t+2,a=new Float64Array(i);for(let l=0;l<i;l++)a[l]=Ft(o+(r-o)*l/(i-1));let c=new Float64Array(i-1);for(let l=0;l<i-1;l++)c[l]=a[l+1]-a[l];let d=new Float32Array(t*Y);for(let l=0;l<t;l++){let h=2/(a[l+2]-a[l]),u=l*Y;for(let f=0;f<Y;f++){let _=(n[f]-a[l])/c[l],m=(a[l+2]-n[f])/c[l+1];d[u+f]=Math.max(0,Math.min(_,m))*h}}return d}function as(t){let e=Tt.get(t);return e||(e=yt(t),Tt.set(t,e)),e}function Pt(){let t=new Float64Array(512),e=56;for(let s=0;s<400;s++)t[e+s]=.5*(1-Math.cos(2*Math.PI*s/399));return t}function cs(){return Je||(Je=Pt()),Je}function et(t){let e=St.get(t);if(e)return e;let s=Math.log2(t);if(1<<s!==t)throw new Error(`FFT size must be power-of-two. Received: ${t}`);let n=t>>1,o=new Float64Array(n),r=new Float64Array(n);for(let c=0;c<n;c++){let d=-2*Math.PI*c/t;o[c]=Math.cos(d),r[c]=Math.sin(d)}let i=new Uint32Array(t);for(let c=0;c<t;c++){let d=c,l=0;for(let h=0;h<s;h++)l=l<<1|d&1,d>>=1;i[c]=l}let a={cos:o,sin:r,bitrev:i};return St.set(t,a),a}function At(t,e,s,n){if(n.bitrev&&n.bitrev.length===s){let o=n.bitrev;for(let r=0;r<s;r++){let i=o[r];if(r<i){let a=t[r];t[r]=t[i],t[i]=a,a=e[r],e[r]=e[i],e[i]=a}}}else{let o=0;for(let r=0;r<s-1;r++){if(r<o){let a=t[r];t[r]=t[o],t[o]=a,a=e[r],e[r]=e[o],e[o]=a}let i=s>>1;for(;i<=o;)o-=i,i>>=1;o+=i}}if(s>=2)for(let o=0;o<s;o+=2){let r=o,i=o+1,a=t[i],c=e[i];t[i]=t[r]-a,e[i]=e[r]-c,t[r]+=a,e[r]+=c}if(s>=4)for(let o=0;o<s;o+=4){let r=o,i=o+2,a=t[i],c=e[i];t[i]=t[r]-a,e[i]=e[r]-c,t[r]+=a,e[r]+=c;let d=o+1,l=o+3,h=e[l],u=-t[l];t[l]=t[d]-h,e[l]=e[d]-u,t[d]+=h,e[d]+=u}if(s>=8)for(let o=0;o<s;o+=8){{let r=o,i=o+4,a=t[i],c=e[i];t[i]=t[r]-a,e[i]=e[r]-c,t[r]+=a,e[r]+=c}{let r=ze,i=-ze,a=o+1,c=a+4,d=t[c]*r-e[c]*i,l=t[c]*i+e[c]*r;t[c]=t[a]-d,e[c]=e[a]-l,t[a]+=d,e[a]+=l}{let r=o+2,i=r+4,a=e[i],c=-t[i];t[i]=t[r]-a,e[i]=e[r]-c,t[r]+=a,e[r]+=c}{let r=-ze,i=-ze,a=o+3,c=a+4,d=t[c]*r-e[c]*i,l=t[c]*i+e[c]*r;t[c]=t[a]-d,e[c]=e[a]-l,t[a]+=d,e[a]+=l}}for(let o=16;o<=s;o<<=1){let r=o>>1,i=s/o;for(let a=0;a<s;a+=o)for(let c=0;c<r;c++){let d=c*i,l=n.cos[d],h=n.sin[d],u=a+c,f=u+r,_=t[f]*l-e[f]*h,m=t[f]*h+e[f]*l;t[f]=t[u]-_,e[f]=e[u]-m,t[u]+=_,e[u]+=m}}}var te=class{constructor(e={}){this.nMels=e.nMels||128,this.melFilterbank=as(this.nMels),this.hannWindow=cs(),this.twiddles=et(512),this.twiddlesHalf=et(256),this._fftRe=new Float64Array(256),this._fftIm=new Float64Array(256),this._powerBuf=new Float32Array(Y),this._paddedBuffer=null,this.fbBounds=new Int32Array(this.nMels*2);for(let s=0;s<this.nMels;s++){let n=s*Y,o=-1,r=-1;for(let i=0;i<Y;i++)this.melFilterbank[n+i]>0&&(o===-1&&(o=i),r=i);o===-1&&(o=0,r=-1),this.fbBounds[s*2]=o,this.fbBounds[s*2+1]=r+1}}process(e){let{rawMel:s,nFrames:n,featuresLen:o}=this.computeRawMel(e);return o===0?{features:new Float32Array(0),length:0}:{features:this.normalizeFeatures(s,n,o),length:o}}computeRawMel(e,s=0,n=null){let o=e.length;if(o===0)return{rawMel:n?n.subarray(0,0):new Float32Array(0),nFrames:0,featuresLen:0};let r=256,i=o+2*r,a=!1;if(!this._paddedBuffer||this._paddedBuffer.length<i){let k=Math.ceil(i*1.2);this._paddedBuffer=new Float64Array(k),a=!0}let c=this._paddedBuffer;c[r]=Math.fround(e[0]);for(let k=1;k<o;k++)c[r+k]=Math.fround(e[k]-.97*e[k-1]);a||c.fill(0,r+o,i);let d=Math.floor((i-512)/160)+1,l=Math.floor(o/160);if(l===0)return{rawMel:new Float32Array(0),nFrames:0,featuresLen:0};let h=this.nMels*d,u;if(n&&n.length>=h){if(u=n.subarray(0,h),s>0)for(let k=0;k<this.nMels;k++)u.fill(0,k*d,k*d+s)}else u=new Float32Array(h);let f=this._fftRe,_=this._fftIm,m=this._powerBuf,g=this.hannWindow,E=this.melFilterbank,b=this.nMels,S=this.twiddles,P=this.twiddlesHalf,F=this.fbBounds,y=256,L=y>>1;for(let k=s;k<d;k++){let C=k*160;for(let T=0;T<y;T++){let A=T<<1;f[T]=c[C+A]*g[A],_[T]=c[C+A+1]*g[A+1]}At(f,_,y,P);let D=f[0],z=_[0];m[0]=(D+z)*(D+z),m[y]=(D-z)*(D-z);for(let T=1;T<L;T++){let A=f[T],H=_[T],Q=f[y-T],J=_[y-T],G=.5*(A+Q),oe=.5*(H-J),re=.5*(H+J),$=-.5*(A-Q),v=S.cos[T],N=S.sin[T],W=re*v-$*N,K=re*N+$*v,ce=G+W,me=oe+K;m[T]=ce*ce+me*me;let pe=G-W,Te=oe-K;m[y-T]=pe*pe+Te*Te}let j=f[L],R=_[L];m[L]=j*j+R*R;for(let T=0;T<b;T++){let A=0,H=T*Y,Q=F[T*2],J=F[T*2+1];for(let G=Q;G<J;G++)A+=m[G]*E[H+G];u[T*d+k]=Math.log(A+Mt)}}return{rawMel:u,nFrames:d,featuresLen:l}}normalizeFeatures(e,s,n,o=null){let r=this.nMels,i=r*n,a;o&&o.length>=i?a=o.subarray(0,i):a=new Float32Array(i);for(let c=0;c<r;c++){let d=c*s,l=c*n,h=0;for(let m=0;m<n;m++)h+=e[d+m];let u=h/n,f=0;for(let m=0;m<n;m++){let g=e[d+m]-u;f+=g*g}let _=n>1?1/(Math.sqrt(f/(n-1))+1e-5):0;for(let m=0;m<n;m++)a[l+m]=(e[d+m]-u)*_}return a}},we=class{constructor(e={}){this.preprocessor=new te({nMels:e.nMels||128}),this.nMels=this.preprocessor.nMels,this.boundaryFrames=e.boundaryFrames||3,this._cachedRawMel=null,this._cachedNFrames=0,this._cachedAudioLen=0,this._cachedFeaturesLen=0,this._rawBuffers=[null,null],this._bufIdx=0,this._featuresBuffer=null}reset(){this._cachedRawMel=null,this._cachedNFrames=0,this._cachedAudioLen=0,this._cachedFeaturesLen=0,this._bufIdx=0}process(e,s=0){let n=e.length;if(n===0)return{features:new Float32Array(0),length:0,cached:!1,cachedFrames:0,newFrames:0};let o=s>0&&this._cachedRawMel!==null&&s<=this._cachedAudioLen,r=Math.floor(n/160)+1,i=this.nMels*r,a=this._rawBuffers[this._bufIdx];if(!a||a.length<i){let g=Math.ceil(i*1.2);a=new Float32Array(g),this._rawBuffers[this._bufIdx]=a}let c=Math.floor(n/160),d=this.nMels*c;if(!this._featuresBuffer||this._featuresBuffer.length<d){let g=Math.ceil(d*1.2);this._featuresBuffer=new Float32Array(g)}if(!o){let{rawMel:g,nFrames:E,featuresLen:b}=this.preprocessor.computeRawMel(e,0,a),S=this.preprocessor.normalizeFeatures(g,E,b,this._featuresBuffer);return this._cachedRawMel=g,this._cachedNFrames=E,this._cachedAudioLen=n,this._cachedFeaturesLen=b,this._bufIdx^=1,{features:new Float32Array(S),length:b,cached:!1,cachedFrames:0,newFrames:b}}let l=Math.floor(s/160),h=Math.max(0,Math.min(l-this.boundaryFrames,this._cachedFeaturesLen)),{rawMel:u,nFrames:f,featuresLen:_}=this.preprocessor.computeRawMel(e,h,a);if(h>0&&this._cachedRawMel)for(let g=0;g<this.nMels;g++){let E=g*this._cachedNFrames,b=g*f;u.set(this._cachedRawMel.subarray(E,E+h),b)}let m=this.preprocessor.normalizeFeatures(u,f,_,this._featuresBuffer);return this._cachedRawMel=u,this._cachedNFrames=f,this._cachedAudioLen=n,this._cachedFeaturesLen=_,this._bufIdx^=1,{features:new Float32Array(m),length:_,cached:!0,cachedFrames:h,newFrames:_-h}}clear(){this.reset()}},st={SAMPLE_RATE:16e3,N_FFT:512,WIN_LENGTH:400,HOP_LENGTH:160,PREEMPH:.97,LOG_ZERO_GUARD:Mt,N_FREQ_BINS:Y};function ls(t){if(!(t instanceof Float32Array||t instanceof Float64Array))throw new TypeError("ParakeetModel.transcribeLongAudio expected audio to be Float32Array or Float64Array.");for(let e=0;e<t.length;++e)if(!Number.isFinite(t[e]))throw new Error(`ParakeetModel.transcribeLongAudio expected finite audio samples; found ${t[e]} at index ${e}.`)}function ds(t){let e=Number(t);return!Number.isFinite(e)||e<=0?0:Math.max(20,Math.min(180,e))}function fs(t){return{audioDurationS:t,preprocess_ms:0,encode_ms:0,decode_ms:0,tokenize_ms:0,total_ms:0,cached_frames:0,new_frames:0,hasMetrics:!1,hasMelCache:!1}}function he(t,e,s){typeof s=="number"&&Number.isFinite(s)&&(t[e]+=s)}function Et(t,e){!e||typeof e!="object"||(t.hasMetrics=!0,he(t,"preprocess_ms",e.preprocess_ms),he(t,"encode_ms",e.encode_ms),he(t,"decode_ms",e.decode_ms),he(t,"tokenize_ms",e.tokenize_ms),he(t,"total_ms",e.total_ms),e.mel_cache&&typeof e.mel_cache=="object"&&(t.hasMelCache=!0,he(t,"cached_frames",e.mel_cache.cached_frames),he(t,"new_frames",e.mel_cache.new_frames)))}function nt(t){if(!t?.hasMetrics)return null;let e=t.total_ms>0?t.total_ms:t.preprocess_ms+t.encode_ms+t.decode_ms+t.tokenize_ms,s={preprocess_ms:t.preprocess_ms,encode_ms:t.encode_ms,decode_ms:t.decode_ms,tokenize_ms:t.tokenize_ms,total_ms:e,rtf:e>0?t.audioDurationS/(e/1e3):0};return t.hasMelCache&&(s.mel_cache={cached_frames:t.cached_frames,new_frames:t.new_frames}),s}function ot(t){let e="";for(let s of t){let n=s?.text??"";n&&(e?/^[,.;:!?)}\]]+$/.test(n)?e+=n:e+=` ${n}`:e=n)}return e}function It(t){return t.map(e=>({text:e.text,timestamp:[e.start_time,e.end_time]}))}function Nt(t){return String(t??"").normalize("NFKC").toLowerCase().replace(/^[("'“‘\[{]+/g,"").replace(/[.,!?;:)"'”’\]}]+$/g,"").trim()}function Ct(t){return String(t??"").normalize("NFKC").toLowerCase().trim()}function ue(t){let e=[];for(let s of t){let n=e.at(-1),o=Nt(n?.text),r=Nt(s?.text);if(n&&o===r&&(o.length>0||Ct(n.text)===Ct(s.text))&&s.start_time<n.end_time){let i=n.end_time-n.start_time;s.end_time-s.start_time>i&&(e[e.length-1]=s);continue}e.push(s)}return e}var hs=/[!?…](?:["')\]]+)?$/u,us=/\.(?:["')\]]+)?$/u,ms=/["')\]]+$/gu,ps=/^[("'“‘\[{]+/u,_s=/^(?:[A-Z]\.){2,}$/,gs=/^[A-Z]\.$/,ws=/^(?:[IVXLCDM]+)\.$/i,bs=/^\d+\.$/,ks=3,Ts=new Set(["mr.","mrs.","ms.","dr.","prof.","sr.","jr.","vs.","etc.","e.g.","i.e."]);function Ss(t){return String(t??"").replace(ms,"")}function Ms(t){let e=String(t??"").replace(ps,"");return/^[A-Z]/.test(e)}function xs(t,e,s=0){if(!e)return!1;if(s>=ks)return!0;let n=String(t?.text??"");if(!n)return!1;if(hs.test(n))return!0;if(!us.test(n))return!1;let o=Ss(n),r=o.toLowerCase();return Ts.has(r)||_s.test(o)||gs.test(o)||ws.test(o)||bs.test(o)?!1:Ms(e.text)}function Lt(t){if(!Array.isArray(t)||t.length===0)return[];let e=[],s=[];for(let n=0;n<t.length;++n){let o=t[n];s.push(o);let r=t[n+1]??null,i=r?Math.max(0,r.start_time-o.end_time):0;xs(o,r,i)&&(e.push({words:s,text:ot(s),timestamp:[s[0].start_time,s[s.length-1].end_time]}),s=[])}return s.length>0&&e.push({words:s,text:ot(s),timestamp:[s[0].start_time,s[s.length-1].end_time]}),e}function Dt(t,e=""){return!Array.isArray(t)||t.length===0?e?[{text:e,timestamp:[0,0]}]:[]:Lt(t).map(s=>({text:s.text,timestamp:s.timestamp}))}function Fs(t){return t.flatMap(e=>e.words)}function ys(t,e){let s=Array.isArray(t)?t:[],n=Array.isArray(e)?e:[];if(s.length===0)return ue(n);if(n.length===0)return ue(s);let o=s[0].start_time;return n[0].start_time<=o+1e-6?ue(n):ue([...s,...n])}function Ot(t){return String(t??"").normalize("NFKC").replace(/[“”]/g,'"').replace(/[‘’]/g,"'").replace(/\s+/g," ").trim().toLowerCase()}function Ps(t,e){let s=Ot(e.text);return s?t.some(n=>Ot(n.text)===s&&Math.abs(n.timestamp[1]-e.timestamp[1])<.15):!1}function vt(t,e){Ps(t,e)||t.push(e)}function As(t,e){let s=t,n=.5+1;for(let o=0;o<e.length-1;++o){let r=e[o],i=e[o+1],a=r.end_time,c=i.start_time;if(!(c-a<.2))for(let l of[a,c]){if(l+1e-6<t)continue;let h=l-t;h<=.5&&h<n&&(s=l,n=h)}}return s}async function Es({audio:t,samplingRate:e,chunkLengthS:s,baseTimeOffset:n,transcribeWindow:o}){let r=t.length/e,i=Math.min(10,Math.max(0,s-1)),a=Math.max(1,s-i),c=Math.max(4,Math.ceil(Math.max(0,r-s)/1)+2),d=[],l=[],h="",u=0,f=!1;for(let E=0;E<c&&u<r-1e-6;++E){let b=Math.min(r,u+s),S=Math.max(0,Math.min(t.length-1,Math.floor(u*e))),P=Math.max(S+1,Math.min(t.length,Math.ceil(b*e))),F=t.subarray(S,P),y=b>=r-1e-6,L=await o(F,n+u);h=L.text??h;let k=Array.isArray(L.words)?L.words:[],C=f?ys(l,k):ue(k),D=Lt(C);if(y){for(let j of D)vt(d,j);l=[];break}if(D.length>1){let j=D[D.length-1],R=j.timestamp[0],T=Math.max(0,R-n);if(T>=u+1-1e-6){let A=D.slice(0,-1);for(let Q of A)vt(d,Q);l=ue(j.words);let H=Math.min(r,Math.max(0,As(R,C)-n));if(f=H>T+1e-6,H>u+1e-6){u=H;continue}}}l=C,f=!0;let z=Math.min(r,u+a);if(z<=u+1e-6)break;u=z}let _=ue([...Fs(d),...l]),m=_.length>0?ot(_):String(h??"").trim(),g=Dt(_,m);return{text:m,words:_,chunks:g}}async function Rt(t,e,s=16e3,n={}){if(ls(e),typeof s!="number"||!Number.isFinite(s)||s<=0)throw new Error("ParakeetModel.transcribeLongAudio expected `sampleRate` to be a positive finite number.");let{returnTimestamps:o=!1,chunkLengthS:r=0,timeOffset:i=0,...a}=n;if(typeof i!="number"||!Number.isFinite(i)||i<0)throw new Error("ParakeetModel.transcribeLongAudio expected `timeOffset` to be a finite non-negative number.");let c=o==="word",d=o===!0||c,l=ds(r),h=e.length/s,u=l<=0&&h>180,f=l>0?l:u?90:0,_=fs(h),m=async(S,P)=>{let F=await t.transcribe(S,s,{...a,_skipAudioValidation:!0,returnTimestamps:!0,timeOffset:P});return Et(_,F.metrics),{text:F.utterance_text??"",words:Array.isArray(F.words)?F.words:[]}};if(f>0){let S=await Es({audio:e,samplingRate:s,chunkLengthS:f,baseTimeOffset:i,transcribeWindow:m}),P={text:S.text,metrics:nt(_)};return d&&(P.words=S.words,P.chunks=c?It(S.words):S.chunks),P}let g=await t.transcribe(e,s,{...a,_skipAudioValidation:!0,returnTimestamps:d,timeOffset:i});Et(_,g.metrics);let E=g.utterance_text??"";if(!d)return{text:E,metrics:nt(_)};let b=Array.isArray(g.words)?g.words:[];return{text:E,words:b,chunks:c?It(b):Dt(b,E),metrics:nt(_)}}function Is(t,e){if(!(t instanceof Float32Array||t instanceof Float64Array))return t;let s=null,n=0;for(let o=0;o<t.length;++o)Number.isFinite(t[o])||(s||(s=t.slice()),s[o]=0,n+=1);return s?(console.warn(`[Parakeet.js] ${e} received ${n} non-finite audio sample(s); replacing them with 0 for compatibility.`),s):t}function Ns(t,e){return Number.isFinite(t)?t:(console.warn(`[Parakeet.js] ${e} received non-finite timeOffset; using 0 for compatibility.`),0)}var be=class t{constructor({tokenizer:e,encoderSession:s,joinerSession:n,preprocessor:o,ort:r,subsampling:i=8,windowStride:a=.01,normalizer:c=u=>u,onnxPreprocessor:d=null,nMels:l,maxIncrementalCacheSize:h=50}){this.tokenizer=e,this.encoderSession=s,this.joinerSession=n,this.preprocessor=o,this.ort=r,this._onnxPreprocessor=d,this._jsPreprocessor=o instanceof te?o:null,this._incrementalMel=o instanceof te?new we({nMels:o.nMels}):null,this.blankId=e.blankId,this.predHidden=640,this.predLayers=2,this.maxTokensPerStep=10;let u=this.predLayers,f=this.predHidden,_=u*1*f,m=new Float32Array(_);this._combState1=new r.Tensor("float32",m,[u,1,f]),this._combState2=new r.Tensor("float32",m.slice(),[u,1,f]),this._normalizer=c,this.subsampling=i,this.windowStride=a,this._nMels=l||128,this._targetIdArray=new Int32Array(1),this._targetTensor=new r.Tensor("int32",this._targetIdArray,[1,1]),this._targetLenArray=new Int32Array([1]),this._targetLenTensor=new r.Tensor("int32",this._targetLenArray,[1]),this._encoderFrameBuffer=null,this._encoderFrameTensor=null,this._incrementalCache=new Map,this.maxIncrementalCacheSize=h,this._warnedMissingDecoderStates=!1,this._warnedMissingDurationLogits=!1}static async fromUrls(e){let{encoderUrl:s,decoderUrl:n,tokenizerUrl:o,preprocessorUrl:r,encoderDataUrl:i,decoderDataUrl:a,filenames:c,backend:d="webgpu-hybrid",wasmPaths:l,subsampling:h=8,windowStride:u=.01,verbose:f=!1,enableProfiling:_=!1,enableGraphCapture:m,cpuThreads:g=void 0,preprocessorBackend:E="js",nMels:b}=e,S=E==="js";if(console.log(`[Parakeet.js] Preprocessor backend requested: '${E}' \u2192 ${S?"JS (mel.js)":"ONNX"}`),!s||!n||!o||!r&&!S)throw new Error('fromUrls requires encoderUrl, decoderUrl, tokenizerUrl and preprocessorUrl (preprocessorUrl not needed if preprocessorBackend="js")');let P=d;d.startsWith("webgpu")&&(P="webgpu");let F=await Le({backend:P,wasmPaths:l,numThreads:g}),y=!!m&&d==="webgpu-strict",L=d==="wasm",k={executionProviders:[],graphOptimizationLevel:"all",executionMode:"parallel",enableCpuMemArena:!0,enableMemPattern:!0,enableProfiling:_,enableGraphCapture:y,logSeverityLevel:f?0:2};d==="webgpu-hybrid"?k.executionProviders=[{name:"webgpu",deviceType:"gpu",powerPreference:"high-performance"},"wasm"]:d==="webgpu-strict"?k.executionProviders=[{name:"webgpu",deviceType:"gpu",powerPreference:"high-performance"}]:d==="wasm"&&(k.executionProviders=["wasm"]),console.log(`[Parakeet.js] Creating ONNX sessions with execution mode '${d}'. Providers:`,k.executionProviders),f&&console.log("[Parakeet.js] Verbose logging enabled for ONNX Runtime.");let C={...k};i&&c?.encoder&&(C.externalData=[{data:i,path:c.encoder+".data"}]);let D={...k};a&&c?.decoder&&(D.externalData=[{data:a,path:c.decoder+".data"}]),d.startsWith("webgpu")&&(D.executionProviders=["wasm"]);async function z(v,N){try{return await F.InferenceSession.create(v,N)}catch(W){let K=(W.message||"")+"";if(N.enableGraphCapture&&K.includes("graph capture")){console.warn("[Parakeet] Graph-capture unsupported for this model/backend; retrying without it");let ce={...N,enableGraphCapture:!1};return await F.InferenceSession.create(v,ce)}throw W}}let j=De.fromUrl(o),R=b||128,T=new te({nMels:R}),A=null;!S&&r?(A=new Re(r,{backend:"wasm",wasmPaths:l,enableProfiling:_,enableGraphCapture:!1,numThreads:g}),console.log(`[Parakeet.js] ONNX preprocessor session created (${R} mel bins)`)):!S&&!r&&console.warn("[Parakeet.js] ONNX preprocessor requested but no URL provided \u2014 falling back to JS");let H=S?T:A||T,Q=Promise.resolve(H);console.log(`[Parakeet.js] Active preprocessor: ${(H===T?"js":"onnx")==="js"?"JS (mel.js) \u2014 no ONNX preprocessor needed":"ONNX (nemo128.onnx)"}, ${R} mel bins`);let G,oe;d==="webgpu-hybrid"?(G=await z(s,C),oe=await z(n,D)):[G,oe]=await Promise.all([z(s,C),z(n,D)]);let[re,$]=await Promise.all([j,Q]);try{let v=new Float32Array(1600);await $.process(v),f&&console.log("[Parakeet.js] Preprocessor warmed up")}catch(v){console.warn("[Parakeet.js] Preprocessor warm-up failed (non-fatal):",v.message)}return new t({tokenizer:re,encoderSession:G,joinerSession:oe,preprocessor:$,ort:F,subsampling:h,windowStride:u,onnxPreprocessor:A!==$?A:null,nMels:R})}async _runCombinedStep(e,s,n=null){let o=typeof s=="number"?s:this.blankId;this._targetIdArray[0]=o;let r=n?.state1||this._combState1,i=n?.state2||this._combState2,a={encoder_outputs:e,targets:this._targetTensor,target_length:this._targetLenTensor,input_states_1:r,input_states_2:i},c=await this.joinerSession.run(a),d=c.outputs,l=c.output_states_1,h=c.output_states_2,u=new Set;for(let F of Object.values(c))!F||typeof F.dispose!="function"||u.has(F)||(u.add(F),!(F===d||F===l||F===h)&&F.dispose());let f=this.tokenizer.id2token.length,_=F=>{d?.dispose?.();let y=new Set,L=k=>{if(k)for(let C of[k.state1,k.state2])!C||C===this._combState1||C===this._combState2||y.has(C)||(y.add(C),C.dispose?.())};throw L({state1:l,state2:h}),L(n),new Error(F)};(!d||!d.data||typeof d.data.subarray!="function")&&_("ParakeetModel decoder output did not include a valid `outputs` tensor.");let m=d.data;m.length<f&&_(`ParakeetModel decoder output is too small (${m.length}) for vocab size ${f}.`);let g=m.length,E=m.subarray(0,f),b=m.subarray(f,g);(!l||!h)&&!this._warnedMissingDecoderStates&&(this._warnedMissingDecoderStates=!0,console.warn("[Parakeet.js] Decoder output did not include both decoder state tensors; reusing the previous state for compatibility.")),b.length===0&&!this._warnedMissingDurationLogits&&(this._warnedMissingDurationLogits=!0,console.warn("[Parakeet.js] Decoder output did not include TDT duration logits; defaulting duration step to 0 for compatibility."));let S=0;if(b.length){let F=-1/0;for(let y=0;y<b.length;++y)b[y]>F&&(F=b[y],S=y)}return{tokenLogits:E,step:S,newState:{state1:l||r,state2:h||i},_logitsTensor:d}}_snapshotDecoderState(e){if(!e)return null;let s=e.state1,n=e.state2;return{s1:new Float32Array(s.data),s2:new Float32Array(n.data),dims1:s.dims.slice(),dims2:n.dims.slice()}}_restoreDecoderState(e){if(!e)return null;let s=new this.ort.Tensor("float32",new Float32Array(e.s1),e.dims1),n=new this.ort.Tensor("float32",new Float32Array(e.s2),e.dims2);return{state1:s,state2:n}}async computeFeatures(e,s=16e3,n={}){let{prefixSamples:o=0,_skipAudioValidation:r=!1}=n,i=r?e:Is(e,"ParakeetModel.computeFeatures");if(this._incrementalMel&&o>0){let l=this._incrementalMel.process(i,o),h=l.length;return{features:l.features,T:h,melBins:this._nMels,cached:l.cached,cachedFrames:l.cachedFrames,newFrames:l.newFrames}}let{features:a,length:c}=await this.preprocessor.process(i),d=a.length/this._nMels;return{features:a,T:d,melBins:this._nMels,validLength:c}}setPreprocessorBackend(e){if(e==="onnx"){if(!this._onnxPreprocessor)throw new Error("ONNX preprocessor not available. Load model with preprocessorUrl to enable ONNX backend.");this.preprocessor=this._onnxPreprocessor,this._incrementalMel=null,console.log("[Parakeet.js] Switched to ONNX preprocessor")}else if(e==="js")this._jsPreprocessor||(this._jsPreprocessor=new te({nMels:128})),this.preprocessor=this._jsPreprocessor,this._incrementalMel=new we({nMels:this._jsPreprocessor.nMels}),console.log("[Parakeet.js] Switched to JS preprocessor (incremental caching enabled)");else throw new Error(`Unknown preprocessor backend: ${e}. Use 'js' or 'onnx'.`)}getPreprocessorBackend(){return this.preprocessor instanceof te?"js":"onnx"}resetMelCache(){this._incrementalMel&&this._incrementalMel.reset()}clearIncrementalCache(){this._incrementalCache.clear()}_disposeDecoderState(e,s=null){e&&(e.state1&&e.state1!==this._combState1&&e.state1!==s?.state1&&e.state1.dispose?.(),e.state2&&e.state2!==this._combState2&&e.state2!==s?.state2&&e.state2.dispose?.())}getFrameTimeStride(){return this.subsampling*this.windowStride}frameToTime(e,s=0){return s+e*this.getFrameTimeStride()}getStreamingConstants(){return{subsampling:this.subsampling,windowStride:this.windowStride,frameTimeStride:this.getFrameTimeStride(),melBins:this._nMels,blankId:this.blankId,maxTokensPerStep:this.maxTokensPerStep}}async transcribe(e,s=16e3,n={}){let{returnTimestamps:o=!1,returnConfidences:r=!1,temperature:i=1,debug:a=!1,enableProfiling:c=!0,skipCMVN:d=!1,frameStride:l=1,previousDecoderState:h=null,returnDecoderState:u=!1,timeOffset:f=0,returnTokenIds:_=!1,returnFrameIndices:m=!1,returnLogProbs:g=!1,returnTdtSteps:E=!1,prefixSamples:b=0,precomputedFeatures:S=null,_skipAudioValidation:P=!1}=n,F=Ns(f,"ParakeetModel.transcribe"),y=a||c,L,k=0,C=0,D=0,z=0;y&&(L=performance.now());let j,R,T,A,H,Q=S?"mel-worker":this.getPreprocessorBackend();if(S)j=S.features,R=S.T,T=S.melBins,A={},console.log(`[Parakeet] Preprocessor: mel-worker (precomputed ${R} frames \xD7 ${T} mel bins, 0 ms)`);else if(y){let p=performance.now();({features:j,T:R,melBins:T,validLength:H,...A}=await this.computeFeatures(e,s,{prefixSamples:b,_skipAudioValidation:P})),k=performance.now()-p;let M=A?.cached?` (cached: ${A.cachedFrames} frames, new: ${A.newFrames} frames)`:"";console.log(`[Parakeet] Preprocessor: ${Q}, ${R} frames \xD7 ${T} mel bins, ${k.toFixed(1)} ms${M}`)}else({features:j,T:R,melBins:T,validLength:H,...A}=await this.computeFeatures(e,s,{prefixSamples:b,_skipAudioValidation:P}));if(!j||!j.length||R<=0||T<=0)return{utterance_text:"",words:[],tokens:[],confidence_scores:{overall_log_prob:null,frame:null,frame_avg:null},metrics:y?{preprocess_ms:+k.toFixed(1),encode_ms:0,decode_ms:0,tokenize_ms:0,total_ms:+(performance.now()-L).toFixed(1),rtf:0}:null,is_final:!n?.incremental};let J=e?e.length/s:R*st.HOP_LENGTH/s,G=new this.ort.Tensor("float32",j,[1,T,R]),oe=H??R,re=new this.ort.Tensor("int64",BigInt64Array.from([BigInt(oe)]),[1]),$;try{if(y){let p=performance.now(),M=await this.encoderSession.run({audio_signal:G,length:re});C=performance.now()-p,$=M.outputs??Object.values(M)[0]}else{let p=await this.encoderSession.run({audio_signal:G,length:re});$=p.outputs??Object.values(p)[0]}}finally{G.dispose?.(),re.dispose?.()}let[,v,N]=$.dims,W;if($.dims.length===3&&$.dims[0]===1&&$.dims[1]===v&&$.dims[2]===N){W=new Float32Array(N*v);let p=$.data;for(let M=0;M<N;M++){let O=M*v,w=0;for(;w<=v-8;w+=8){let U=w*N+M;W[O+w]=p[U],W[O+w+1]=p[U+N],W[O+w+2]=p[U+2*N],W[O+w+3]=p[U+3*N],W[O+w+4]=p[U+4*N],W[O+w+5]=p[U+5*N],W[O+w+6]=p[U+6*N],W[O+w+7]=p[U+7*N]}for(;w<v;w++)W[O+w]=p[w*N+M]}}else console.warn("[Parakeet] Unexpected encoder output format:",$.dims),W=new Float32Array($.data);$.dispose?.(),(!this._encoderFrameBuffer||this._encoderFrameBuffer.length!==v)&&(this._encoderFrameBuffer=new Float32Array(v),this._encoderFrameTensor=new this.ort.Tensor("float32",this._encoderFrameBuffer,[1,v,1]));let K=[],ce=[],me=[],pe=new Map,Te=0,He=[],Ge=[],qe=[],Ie=this.subsampling*this.windowStride,Ke=0,Xe=F,Z=null;h&&(Z=this._restoreDecoderState(h),a&&console.log("[Parakeet] Restored decoder state from previous chunk"));let se=0,X=n.incremental;if(X&&X.cacheKey){se=Math.max(0,Math.min(N,Math.floor(((X.prefixSeconds||0)+1e-6)/Ie)));let p=this._incrementalCache.get(X.cacheKey);p&&p.prefixFrames===se&&p.D===v&&(Ke=se,Xe=F+se*Ie,Z=this._restoreDecoderState(p.state),a&&console.log(`[Parakeet] Incremental cache hit: skipping ${se}/${N} frames (${(se/N*100).toFixed(0)}%)`),this._incrementalCache.delete(X.cacheKey),this._incrementalCache.set(X.cacheKey,p))}let Ne=0,Gt=y?performance.now():0,ht=Ke>0||se===0;for(let p=Ke;p<N;){let M=p*v;this._encoderFrameBuffer.set(W.subarray(M,M+v));let O=K.length?K[K.length-1]:this.blankId,{tokenLogits:w,step:U,newState:ne,_logitsTensor:Me}=await this._runCombinedStep(this._encoderFrameTensor,O,Z),x=-1/0,q=0,ve=w.length,I=0;for(;I<ve%8;I++)w[I]>x&&(x=w[I],q=I);for(;I<ve;I+=8){let B=w[I],ee=w[I+1],de=w[I+2],fe=w[I+3],Fe=w[I+4],ye=w[I+5],Pe=w[I+6],Ae=w[I+7];B>x&&(x=B,q=I),ee>x&&(x=ee,q=I+1),de>x&&(x=de,q=I+2),fe>x&&(x=fe,q=I+3),Fe>x&&(x=Fe,q=I+4),ye>x&&(x=ye,q=I+5),Pe>x&&(x=Pe,q=I+6),Ae>x&&(x=Ae,q=I+7)}let pt=x;i!==1&&(pt=x/i);let xe=1,_t=0;if(r||g){let B=1/i,ee=0,de=0,fe=0,Fe=0,ye=0,Pe=0,Ae=0,gt=0,V=0,wt=w.length;for(;V<=wt-8;V+=8){let Ee=(w[V]-x)*B,Xt=(w[V+1]-x)*B,Vt=(w[V+2]-x)*B,Qt=(w[V+3]-x)*B,Jt=(w[V+4]-x)*B,Zt=(w[V+5]-x)*B,Yt=(w[V+6]-x)*B,es=(w[V+7]-x)*B;ee+=Math.exp(Ee),de+=Math.exp(Xt),fe+=Math.exp(Vt),Fe+=Math.exp(Qt),ye+=Math.exp(Jt),Pe+=Math.exp(Zt),Ae+=Math.exp(Yt),gt+=Math.exp(es)}let Qe=ee+de+fe+Fe+ye+Pe+Ae+gt;for(;V<wt;V++)Qe+=Math.exp((w[V]-x)*B);if(xe=1/Qe,_t=x*B-pt-Math.log(Qe),r){let Ee=pe.get(p);Ee?(Ee.sum+=xe,Ee.count+=1):pe.set(p,{sum:xe,count:1}),Te+=Math.log(xe)}}if(Me?.dispose?.(),q!==this.blankId){if(this._disposeDecoderState(Z,ne),Z=ne,K.push(q),m&&He.push(p),g&&Ge.push(_t),E&&qe.push(U),o){let B=U>0?U:1,ee=Math.min(N,p+Math.max(1,B)),de=Xe+p*Ie,fe=Xe+ee*Ie;ce.push([de,fe])}r&&me.push(xe),Ne+=1}else this._disposeDecoderState(ne,Z);if(U>0?(p+=U,Ne=0):(q===this.blankId||Ne>=this.maxTokensPerStep)&&(p+=l,Ne=0),X&&X.cacheKey&&!ht&&p>=se){let B=this._snapshotDecoderState(Z);if(!this._incrementalCache.has(X.cacheKey)&&this._incrementalCache.size>=this.maxIncrementalCacheSize){let ee=this._incrementalCache.keys().next().value;a&&console.log(`[Parakeet] Incremental cache full (${this.maxIncrementalCacheSize}); evicting oldest entry: ${ee}`),this._incrementalCache.delete(ee)}this._incrementalCache.has(X.cacheKey)&&this._incrementalCache.delete(X.cacheKey),this._incrementalCache.set(X.cacheKey,{state:B,prefixFrames:se,D:v}),ht=!0}}y&&(D=performance.now()-Gt);let ut;y&&(ut=performance.now());let mt=this._normalizer(this.tokenizer.decode(K));if(y&&(z=performance.now()-ut),!o&&!r){if(y){let O=performance.now()-L,w=J/(O/1e3);console.log(`[Perf] RTF: ${w.toFixed(2)}x (audio ${J.toFixed(2)} s, time ${(O/1e3).toFixed(2)} s)`),console.table({Preprocess:`${k.toFixed(1)} ms`,Encode:`${C.toFixed(1)} ms`,Decode:`${D.toFixed(1)} ms`,Tokenize:`${z.toFixed(1)} ms`,Total:`${O.toFixed(1)} ms`})}let p=y?{preprocess_ms:+k.toFixed(1),encode_ms:+C.toFixed(1),decode_ms:+D.toFixed(1),tokenize_ms:+z.toFixed(1),total_ms:+(performance.now()-L).toFixed(1),rtf:+(J/((performance.now()-L)/1e3)).toFixed(2),preprocessor_backend:Q,mel_cache:A?.cached?{cached_frames:A.cachedFrames,new_frames:A.newFrames}:null}:null,M={utterance_text:mt,words:[],metrics:p,is_final:!h};return u&&(M.decoderState=this._snapshotDecoderState(Z)),_&&(M.tokenIds=K.slice()),m&&(M.frameIndices=He.slice()),g&&(M.logProbs=Ge.slice()),E&&(M.tdtSteps=qe.slice()),this._disposeDecoderState(Z,h),M}let le=[],Se=[],_e="",Ve=0,Ce=0,ie=[];if(K.forEach((p,M)=>{let O=this.tokenizer.id2token[p];if(O===this.tokenizer.blankToken)return;let w=O.startsWith("\u2581"),U=w?O.slice(1):O,ne=ce[M]||[null,null],Me=me[M],x={token:U,raw_token:O,is_word_start:w};if(o&&(x.start_time=+ne[0].toFixed(3),x.end_time=+ne[1].toFixed(3)),r&&(x.confidence=+Me.toFixed(4)),Se.push(x),w){if(_e){let q=ie.length?ie.reduce((ve,I)=>ve+I,0)/ie.length:0;le.push({text:_e,start_time:+Ve.toFixed(3),end_time:+Ce.toFixed(3),confidence:+q.toFixed(4)})}_e=U,o&&(Ve=ne[0],Ce=ne[1]),ie=r?[Me]:[]}else _e+=U,o&&(Ce=ne[1]),r&&ie.push(Me)}),_e){let p=ie.length?ie.reduce((M,O)=>M+O,0)/ie.length:0;le.push({text:_e,start_time:+Ve.toFixed(3),end_time:+Ce.toFixed(3),confidence:+p.toFixed(4)})}let qt=le.length&&r?le.reduce((p,M)=>p+M.confidence,0)/le.length:null,Kt=Se.length&&r?Se.reduce((p,M)=>p+(M.confidence||0),0)/Se.length:null;if(y){let p=performance.now()-L,M=J/(p/1e3);console.log(`[Perf] RTF: ${M.toFixed(2)}x (audio ${J.toFixed(2)} s, time ${(p/1e3).toFixed(2)} s)`),console.table({Preprocess:`${k.toFixed(1)} ms`,Encode:`${C.toFixed(1)} ms`,Decode:`${D.toFixed(1)} ms`,Tokenize:`${z.toFixed(1)} ms`,Total:`${p.toFixed(1)} ms`})}let Oe=Array.from(pe.entries()).sort((p,M)=>p[0]-M[0]).map(([,p])=>p.sum/p.count),ge={utterance_text:mt,words:le,tokens:Se,confidence_scores:r?{token:me.map(p=>+p.toFixed(4)),token_avg:+Kt?.toFixed(4),word:le.map(p=>p.confidence),word_avg:+qt?.toFixed(4),frame:Oe.map(p=>+p.toFixed(4)),frame_avg:Oe.length?+(Oe.reduce((p,M)=>p+M,0)/Oe.length).toFixed(4):null,overall_log_prob:+Te.toFixed(6)}:{overall_log_prob:null,frame:null,frame_avg:null},metrics:y?{preprocess_ms:+k.toFixed(1),encode_ms:+C.toFixed(1),decode_ms:+D.toFixed(1),tokenize_ms:+z.toFixed(1),total_ms:+(performance.now()-L).toFixed(1),rtf:+(J/((performance.now()-L)/1e3)).toFixed(2),preprocessor_backend:Q,mel_cache:A?.cached?{cached_frames:A.cachedFrames,new_frames:A.newFrames}:null}:null,is_final:!X&&!h};return u&&(ge.decoderState=this._snapshotDecoderState(Z)),_&&(ge.tokenIds=K.slice()),m&&(ge.frameIndices=He.slice()),g&&(ge.logProbs=Ge.map(p=>+p.toFixed(6))),E&&(ge.tdtSteps=qe.slice()),this._disposeDecoderState(Z,h),ge}createStreamingTranscriber(e={}){return new We(this,e)}async transcribeLongAudio(e,s=16e3,n={}){return Rt(this,e,s,n)}endProfiling(){try{this.encoderSession?.endProfiling()}catch{}try{this.joinerSession?.endProfiling()}catch{}let e=this.ort?.env?.wasm?.FS;if(!e)return console.warn("[Parakeet] Profiling FS not accessible"),null;let s=e.readdir("/tmp").filter(o=>o.startsWith("profile_")&&o.endsWith(".json"));if(!s.length)return console.warn("[Parakeet] No profiling files found. Was profiling enabled?"),null;let n={};for(let o of s)try{let r=e.readFile("/tmp/"+o,{encoding:"utf8"}),i=JSON.parse(r),a=0,c=0;for(let d of i)if(d.cat==="Node"){let l=d.args?.provider;l==="webgpu"?a+=d.dur:l&&(c+=d.dur)}n[o]={gpu_us:a,cpu_us:c,total_us:a+c}}catch(r){console.warn("[Parakeet] Failed to parse profile file",o,r)}return console.table(n),n}},We=class{constructor(e,s={}){this.model=e,this.opts={returnTimestamps:s.returnTimestamps??!0,returnConfidences:s.returnConfidences??!1,returnTokenIds:s.returnTokenIds??!1,sampleRate:s.sampleRate??16e3,debug:s.debug??!1},this._decoderState=null,this._currentOffset=0,this._totalWords=[],this._totalTokenIds=[],this._chunkCount=0,this._isFinalized=!1,this._metrics={preprocess_ms:0,encode_ms:0,decode_ms:0,tokenize_ms:0,total_ms:0,cached_frames:0,new_frames:0},this._hasMetrics=!1,this._hasMelCacheMetrics=!1}_accumulateMetrics(e){if(!(!e||typeof e!="object")){this._hasMetrics=!0;for(let s of["preprocess_ms","encode_ms","decode_ms","tokenize_ms","total_ms"])typeof e[s]=="number"&&Number.isFinite(e[s])&&(this._metrics[s]+=e[s]);e.mel_cache&&typeof e.mel_cache=="object"&&(this._hasMelCacheMetrics=!0,typeof e.mel_cache.cached_frames=="number"&&Number.isFinite(e.mel_cache.cached_frames)&&(this._metrics.cached_frames+=e.mel_cache.cached_frames),typeof e.mel_cache.new_frames=="number"&&Number.isFinite(e.mel_cache.new_frames)&&(this._metrics.new_frames+=e.mel_cache.new_frames))}}_getCumulativeMetrics(){if(!this._hasMetrics)return null;let e=this._metrics.total_ms>0?this._metrics.total_ms:this._metrics.preprocess_ms+this._metrics.encode_ms+this._metrics.decode_ms+this._metrics.tokenize_ms,s={preprocess_ms:this._metrics.preprocess_ms,encode_ms:this._metrics.encode_ms,decode_ms:this._metrics.decode_ms,tokenize_ms:this._metrics.tokenize_ms,total_ms:e,rtf:e>0?this._currentOffset/(e/1e3):0};return this._hasMelCacheMetrics&&(s.mel_cache={cached_frames:this._metrics.cached_frames,new_frames:this._metrics.new_frames}),s}async processChunk(e){if(this._isFinalized)throw new Error("Streamer is finalized. Create a new instance to process more audio.");let s=e.length/this.opts.sampleRate,n=await this.model.transcribe(e,this.opts.sampleRate,{returnTimestamps:this.opts.returnTimestamps,returnConfidences:this.opts.returnConfidences,returnTokenIds:this.opts.returnTokenIds,previousDecoderState:this._decoderState,returnDecoderState:!0,timeOffset:this._currentOffset});return this._decoderState=n.decoderState,this._currentOffset+=s,this._chunkCount++,this._accumulateMetrics(n.metrics),n.words&&n.words.length>0&&this._totalWords.push(...n.words),this.opts.returnTokenIds&&n.tokenIds&&this._totalTokenIds.push(...n.tokenIds),this.opts.debug&&console.log(`[Streamer] Chunk ${this._chunkCount}: "${n.utterance_text}" (${n.words?.length||0} words, offset: ${this._currentOffset.toFixed(2)}s)`),{chunkText:n.utterance_text,chunkWords:n.words||[],text:this._totalWords.map(o=>o.text).join(" "),words:this._totalWords.slice(),totalDuration:this._currentOffset,chunkCount:this._chunkCount,is_final:!1,...this.opts.returnTokenIds?{tokenIds:this._totalTokenIds.slice()}:{},...this.opts.returnConfidences&&n.confidence_scores?{confidence_scores:n.confidence_scores}:{},metrics:this._getCumulativeMetrics()}}finalize(){return this._isFinalized=!0,{text:this._totalWords.map(e=>e.text).join(" "),words:this._totalWords.slice(),totalDuration:this._currentOffset,chunkCount:this._chunkCount,is_final:!0,...this.opts.returnTokenIds?{tokenIds:this._totalTokenIds.slice()}:{},metrics:this._getCumulativeMetrics()}}reset(){this._decoderState=null,this._currentOffset=0,this._totalWords=[],this._totalTokenIds=[],this._chunkCount=0,this._isFinalized=!1,this._metrics={preprocess_ms:0,encode_ms:0,decode_ms:0,tokenize_ms:0,total_ms:0,cached_frames:0,new_frames:0},this._hasMetrics=!1,this._hasMelCacheMetrics=!1}getState(){return{hasDecoderState:this._decoderState!==null,currentOffset:this._currentOffset,wordCount:this._totalWords.length,chunkCount:this._chunkCount,isFinalized:this._isFinalized}}};var rt=class{constructor(e={}){this.frameTimeStride=e.frameTimeStride||.08,this.timeTolerance=e.timeTolerance||.2,this.stabilityThreshold=e.stabilityThreshold||2,this.confirmedTokens=[],this.pendingTokens=[],this.stabilityMap=new Map}_tokenKey(e,s){let n=Math.round(s*10);return`${e}@${n}`}processChunk(e,s,n=0){if(!e.tokenIds||!e.frameIndices)throw new Error("FrameAlignedMerger requires tokenIds and frameIndices");let o=e.tokenIds.map((d,l)=>({id:d,frameIndex:e.frameIndices[l],absTime:s+e.frameIndices[l]*this.frameTimeStride,logProb:e.logProbs?.[l]??0,text:e.tokens?.[l]?.token||""})),r=s+n,i=o.filter(d=>d.absTime<r),a=o.filter(d=>d.absTime>=r),c=this._findAnchors(i);if(c.length>0){let d=c[0].absTime,l=this.pendingTokens.filter(h=>h.absTime<d);this.confirmedTokens.push(...l);for(let h of i){let u=this._tokenKey(h.id,h.absTime),f=(this.stabilityMap.get(u)||0)+1;this.stabilityMap.set(u,f),f>=this.stabilityThreshold&&(this.confirmedTokens.some(m=>Math.abs(m.absTime-h.absTime)<this.timeTolerance&&m.id===h.id)||this.confirmedTokens.push(h))}}return this.pendingTokens=a,{confirmed:this.confirmedTokens.slice(),pending:this.pendingTokens.slice(),anchorsFound:c.length,totalTokens:this.confirmedTokens.length+this.pendingTokens.length}}_findAnchors(e){let s=[],n=new Map;for(let o of this.pendingTokens){let r=n.get(o.id);r?r.push(o):n.set(o.id,[o])}for(let o of e){let r=n.get(o.id);if(r){for(let i of r)if(Math.abs(o.absTime-i.absTime)<this.timeTolerance){s.push(o);break}}}return s.sort((o,r)=>o.absTime-r.absTime)}getText(e){let s=[...this.confirmedTokens,...this.pendingTokens];s.sort((o,r)=>o.absTime-r.absTime);let n=s.map(o=>o.id);return e.decode(n)}getAllTokens(){return[...this.confirmedTokens,...this.pendingTokens].sort((s,n)=>s.absTime-n.absTime)}reset(){this.confirmedTokens=[],this.pendingTokens=[],this.stabilityMap.clear()}getState(){return{confirmedCount:this.confirmedTokens.length,pendingCount:this.pendingTokens.length,stabilityMapSize:this.stabilityMap.size}}},it=class{constructor(e={}){this.frameTimeStride=e.frameTimeStride||.08,this.timeTolerance=e.timeTolerance||.15,this.K=e.sequenceAnchorLength||3,this.vignetteSigmaFactor=e.vignetteSigmaFactor||.25,this.confirmedTokens=[],this.pendingTokens=[],this._lcsBuffer=new Int32Array(1024)}processChunk(e,s,n=0){if(!e.tokenIds||!e.frameIndices)throw new Error("LCSPTFAMerger requires tokenIds and frameIndices");let o=e.tokenIds.length,r=e.tokenIds.map((m,g)=>({id:m,frameIndex:e.frameIndices[g],absTime:s+e.frameIndices[g]*this.frameTimeStride,logProb:e.logProbs?.[g]??0,text:e.tokens?.[g]?.token||"",vignetteWeight:this._computeVignette(g,o)})),i=s+n,a=r.filter(m=>m.absTime<i),c=r.filter(m=>m.absTime>=i);if(this.pendingTokens.length===0)return this.pendingTokens=r,{confirmed:this.confirmedTokens.slice(),pending:this.pendingTokens.slice(),lcsLength:0,anchorValid:!1,isFirstChunk:!0};let d=this.pendingTokens.map(m=>m.id),l=a.map(m=>m.id),[h,u,f]=this._lcsSubstring(d,l),_=!1;if(f>=this.K&&(_=this._verifyFrameAlignment(this.pendingTokens.slice(h,h+f),a.slice(u,u+f))),_){let m=h+f;this.confirmedTokens.push(...this.pendingTokens.slice(0,m))}else if(f>0){let m=this.pendingTokens.slice(h,h+f),g=a.slice(u,u+f),E=this._arbitrateByLogProb(m,g);this.confirmedTokens.push(...this.pendingTokens.slice(0,h)),this.confirmedTokens.push(...E)}else this.confirmedTokens.push(...this.pendingTokens);return this.pendingTokens=c,{confirmed:this.confirmedTokens.slice(),pending:this.pendingTokens.slice(),lcsLength:f,anchorValid:_,overlapTokenCount:a.length}}_lcsSubstring(e,s){let n=e.length,o=s.length;if(n===0||o===0)return[0,0,0];this._lcsBuffer.length<o+1?this._lcsBuffer=new Int32Array(o+1+1024):this._lcsBuffer.fill(0,0,o+1);let r=this._lcsBuffer,i=0,a=0,c=0;for(let h=1;h<=n;h++){let u=0;for(let f=1;f<=o;f++){let _=r[f];e[h-1]===s[f-1]?(r[f]=u+1,r[f]>i&&(i=r[f],a=h,c=f)):r[f]=0,u=_}}let d=a-i,l=c-i;return[d,l,i]}_verifyFrameAlignment(e,s){if(e.length!==s.length)return!1;for(let n=0;n<e.length;n++)if(Math.abs(e[n].absTime-s[n].absTime)>this.timeTolerance)return!1;return!0}_arbitrateByLogProb(e,s){if(!(e.some(i=>i.logProb!==0)||s.some(i=>i.logProb!==0)))return e;let o=e.reduce((i,a)=>i+a.logProb*a.vignetteWeight,0),r=s.reduce((i,a)=>i+a.logProb*a.vignetteWeight,0);return o>=r?e:s}_computeVignette(e,s){if(s<=1)return 1;let n=(s-1)/2,o=s*this.vignetteSigmaFactor;return Math.exp(-Math.pow(e-n,2)/(2*o*o))}getText(e){let s=this.confirmedTokens.map(o=>o.id),n=this.pendingTokens.map(o=>o.id);return{confirmed:e.decode(s),pending:e.decode(n),full:e.decode([...s,...n])}}getAllTokens(){return[...this.confirmedTokens,...this.pendingTokens].sort((e,s)=>e.absTime-s.absTime)}reset(){this.confirmedTokens=[],this.pendingTokens=[]}getState(){return{confirmedCount:this.confirmedTokens.length,pendingCount:this.pendingTokens.length,lastConfirmedTime:this.confirmedTokens.length>0?this.confirmedTokens[this.confirmedTokens.length-1].absTime:0,lastPendingTime:this.pendingTokens.length>0?this.pendingTokens[this.pendingTokens.length-1].absTime:0}}};var zt={en:"English",fr:"French",de:"German",es:"Spanish",it:"Italian",pt:"Portuguese",nl:"Dutch",pl:"Polish",ru:"Russian",uk:"Ukrainian",ja:"Japanese",ko:"Korean",zh:"Chinese"},ae={"parakeet-tdt-0.6b-v2":{repoId:"ysdede/parakeet-tdt-0.6b-v2-onnx",displayName:"Parakeet TDT 0.6B v2 (English)",languages:["en"],defaultLanguage:"en",vocabSize:1025,featuresSize:128,preprocessor:"nemo128",subsampling:8,predHidden:640,predLayers:2},"parakeet-tdt-0.6b-v3":{repoId:"ysdede/parakeet-tdt-0.6b-v3-onnx",displayName:"Parakeet TDT 0.6B v3 (Multilingual)",languages:["en","fr","de","es","it","pt","nl","pl","ru","uk","ja","ko","zh"],defaultLanguage:"en",vocabSize:4097,featuresSize:128,preprocessor:"nemo128",subsampling:8,predHidden:640,predLayers:2}},Cs="parakeet-tdt-0.6b-v2";function Ue(t){if(ae[t])return ae[t];for(let[e,s]of Object.entries(ae))if(s.repoId===t)return s;return null}function Os(t){for(let[e,s]of Object.entries(ae))if(s.repoId===t)return e;return null}function vs(t,e){let s=Ue(t);return s?s.languages.includes(e.toLowerCase()):!1}function Ls(){return Object.keys(ae)}function Ds(t){return zt[t.toLowerCase()]||t}var Rs="parakeet-cache-db",ke="file-store",at=null,Be=new Map,$t={int8:".int8.onnx",fp16:".fp16.onnx",fp32:".onnx"};function ct(t,e){let s=$t[e];if(!s)throw new Error(`[Hub] Unknown quantization '${e}'; expected one of: ${Object.keys($t).join(", ")}`);return`${t}${s}`}function jt(t){return String(t||"").split("/").map(e=>encodeURIComponent(e)).join("/")}function lt(t){return typeof t!="string"?"":t.replace(/^\.\//,"").replace(/\\/g,"/")}function Wt(t){return Array.isArray(t)?t.filter(e=>e?.type==="file"&&typeof e?.path=="string").map(e=>lt(e.path)):t&&typeof t=="object"&&Array.isArray(t.siblings)?t.siblings.map(e=>lt(e?.rfilename)).filter(Boolean):[]}function dt(t,e){if(!t)return!1;let s=lt(e);return t.some(n=>n===s||n.endsWith(`/${s}`))}async function zs(t,e="main"){let s=`${t}@${e}`;if(Be.has(s))return Be.get(s);let n=jt(t),o=encodeURIComponent(e),r=`https://huggingface.co/api/models/${n}/tree/${o}?recursive=1`,i=`https://huggingface.co/api/models/${n}?revision=${o}`;try{let a=await fetch(r);if(!a.ok)throw new Error(`Failed to list repo files from tree API: ${a.status}`);let c=Wt(await a.json());return Be.set(s,c),c}catch(a){console.warn("[Hub] Could not fetch repo tree listing; trying model metadata listing",a)}try{let a=await fetch(i);if(!a.ok)throw new Error(`Failed to list repo files from metadata API: ${a.status}`);let c=Wt(await a.json());return Be.set(s,c),c}catch(a){return console.warn("[Hub] Could not fetch repo file list \u2013 falling back to optimistic fetch",a),null}}function Ht(){return at||(at=new Promise((t,e)=>{let s=indexedDB.open(Rs,1);s.onerror=()=>e("Error opening IndexedDB"),s.onsuccess=()=>t(s.result),s.onupgradeneeded=n=>{let o=n.target.result;o.objectStoreNames.contains(ke)||o.createObjectStore(ke)}})),at}async function $s(t){let e=await Ht();return new Promise((s,n)=>{let i=e.transaction([ke],"readonly").objectStore(ke).get(t);i.onerror=()=>n("Error reading from DB"),i.onsuccess=()=>s(i.result)})}async function Ws(t,e){let s=await Ht();return new Promise((n,o)=>{let a=s.transaction([ke],"readwrite").objectStore(ke).put(e,t);a.onerror=()=>o("Error writing to DB"),a.onsuccess=()=>n(a.result)})}async function je(t,e,s={}){let{revision:n="main",subfolder:o="",progress:r}=s,i=encodeURIComponent(n),a=o?o.split("/").map(P=>encodeURIComponent(P)).join("/"):"",c=e.split("/").map(P=>encodeURIComponent(P)).join("/"),d="https://huggingface.co",l=[jt(t),"resolve",i];a&&l.push(a),l.push(c);let h=`${d}/${l.join("/")}`,u=`hf-${t}-${n}-${o}-${e}`;if(typeof indexedDB<"u")try{let P=await $s(u);if(P)return console.log(`[Hub] Using cached ${e} from IndexedDB`),URL.createObjectURL(P)}catch(P){console.warn("[Hub] IndexedDB cache check failed:",P)}console.log(`[Hub] Downloading ${e} from ${t}...`);let f=await fetch(h);if(!f.ok)throw new Error(`Failed to download ${e}: ${f.status} ${f.statusText}`);let _=f.headers.get("content-length"),m=_?parseInt(_,10):0,g=0,E=f.body.getReader(),b=[];for(;;){let{done:P,value:F}=await E.read();if(P)break;b.push(F),g+=F.length,r&&m>0&&r({loaded:g,total:m,file:e})}let S=new Blob(b,{type:f.headers.get("content-type")||"application/octet-stream"});if(typeof indexedDB<"u")try{await Ws(u,S),console.log(`[Hub] Cached ${e} in IndexedDB`)}catch(P){console.warn("[Hub] Failed to cache in IndexedDB:",P)}return URL.createObjectURL(S)}async function Us(t,e,s={}){let n=await je(t,e,s),r=await(await fetch(n)).text();return URL.revokeObjectURL(n),r}function Ut(t,e){let s=t==="encoder"?"encoder-model":"decoder_joint-model";return{name:t,key:t==="encoder"?"encoderUrl":"decoderUrl",baseName:s,quant:e,filename:ct(s,e)}}function Bt(t,e,s){if(t.quant!=="fp16"||s===null)return;let n=ct(t.baseName,"fp16"),o=ct(t.baseName,"fp32");if(!dt(s,n))throw dt(s,o)?new Error(`[Hub] ${t.name} FP16 file is missing in ${e} (found ${o} instead). Requested quantization is strict; choose encoderQuant/decoderQuant='fp32' explicitly.`):new Error(`[Hub] Missing ${t.name} model in ${e}: requested ${n}.`)}function Bs(t,e,s,n=!1){let o=[{key:t.encoder.key,name:t.encoder.filename,componentName:"encoder",optional:!1},{key:t.decoder.key,name:t.decoder.filename,componentName:"decoder",optional:!1},{key:"tokenizerUrl",name:"vocab.txt",optional:!1}];return e!=="js"?(o.push({key:"preprocessorUrl",name:`${s}.onnx`,optional:!1}),n&&console.log(`[Hub] Preprocessor: ONNX \u2014 will download ${s}.onnx`)):n&&console.log(`[Hub] Preprocessor: JS (mel.js) \u2014 skipping ${s}.onnx download`),o}function js(t,e){let s=[{key:"encoderDataUrl",name:`${t.encoder.filename}.data`,optional:!0},{key:"decoderDataUrl",name:`${t.decoder.filename}.data`,optional:!0}];return e===null?[]:s.filter(n=>dt(e,n.name))}async function ft(t,e={}){let s=Ue(t),n=s?.repoId||t,o=s?.preprocessor||"nemo128",{encoderQuant:r="int8",decoderQuant:i="int8",preprocessor:a=o,preprocessorBackend:c="js",backend:d="webgpu",progress:l,verbose:h=!1}=e,u=r;d.startsWith("webgpu")&&u==="int8"&&(console.warn("[Hub] Forcing encoder to fp32 on WebGPU (int8 unsupported)"),u="fp32");let f={encoder:Ut("encoder",u),decoder:Ut("decoder",i)},_=await zs(n,e.revision||"main");Bt(f.encoder,n,_),Bt(f.decoder,n,_);let m=Bs(f,c,a,h),g={urls:{},filenames:{encoder:f.encoder.filename,decoder:f.decoder.filename},quantisation:{encoder:f.encoder.quant,decoder:f.decoder.quant},modelConfig:s||null,preprocessorBackend:c};for(let b of m)try{g.urls[b.key]=await je(n,b.name,{...e,progress:l})}catch(S){if(!b.componentName)throw S;let P=f[b.componentName];throw P.quant==="fp16"?new Error(`[Hub] ${P.name} FP16 download failed (${b.name}). Requested quantization is strict; choose encoderQuant/decoderQuant='fp32' explicitly. Original error: ${S.message||S}`):S}let E=js(f,_);for(let b of E)try{g.urls[b.key]=await je(n,b.name,{...e,progress:l})}catch{console.warn(`[Hub] Optional external data file not found: ${b.name}. This is expected if the model is small.`),g.urls[b.key]=null}return g}async function hn(t){return be.fromUrls(t)}function Hs(t){return t?.encoderQuant==="fp16"||t?.decoderQuant==="fp16"}function Gs(t){let s=String(t?.backend||"").startsWith("webgpu"),n=t?.decoderQuant==="fp16";return s&&n?"Decoder runs on WASM in WebGPU modes; try decoderQuant: 'int8' or 'fp32'.":"Try encoderQuant/decoderQuant: 'fp32' (or 'int8' where supported)."}async function un(t,e={}){let s=ae[t]?.repoId||t,n=await ft(s,e),o={...n.urls,filenames:n.filenames,preprocessorBackend:n.preprocessorBackend,...e};try{return await be.fromUrls(o)}catch(r){if(!Hs(e))throw r;let i=Gs(e),a=r?.message||String(r);throw console.warn(`[fromHub] FP16 compile/session load failed. ${i}`,r),new Error(`[fromHub] FP16 compile/session load failed. ${i} Original error: ${a}`,{cause:r})}}export{Cs as DEFAULT_MODEL,rt as FrameAlignedMerger,we as IncrementalMelProcessor,te as JsPreprocessor,zt as LANGUAGE_NAMES,it as LCSPTFAMerger,st as MEL_CONSTANTS,ae as MODELS,be as ParakeetModel,We as StatefulStreamingTranscriber,yt as createMelFilterbank,Pt as createPaddedHannWindow,At as fft,un as fromHub,hn as fromUrls,Ds as getLanguageName,Ue as getModelConfig,je as getModelFile,Os as getModelKeyFromRepoId,Us as getModelText,ft as getParakeetModel,Ye as hzToMel,Ls as listModels,Ft as melToHz,et as precomputeTwiddles,vs as supportsLanguage};</script>
+
+<!-- ===================== Worker (Spracherkennung) ===================== -->
+<script type="text/plain" id="workerCode">
+const LIB_VERSION = '3.8.1';
+const CDN = `https://cdn.jsdelivr.net/npm/@huggingface/transformers@${LIB_VERSION}/dist/`;
+const LIB_FILES = ['transformers.min.js', 'ort-wasm-simd-threaded.jsep.mjs', 'ort-wasm-simd-threaded.jsep.wasm'];
+
+// Parakeet v3: ONNX Runtime Web + Modell von Hugging Face (parakeet.js ist in diese HTML-Datei eingebettet)
+const ORT_VERSION = '1.24.1';
+const ORT_CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+const PK_LIB = ['ort.bundle.min.mjs', 'ort-wasm-simd-threaded.jsep.wasm'];
+const pkLibKey = (f) => `lib/onnxruntime-web-${ORT_VERSION}/${f}`;
+const PK_REPO = 'ysdede/parakeet-tdt-0.6b-v3-onnx';
+const PK_FILES = {
+  cpu: { encoder: 'encoder-model.int8.onnx', decoder: 'decoder_joint-model.int8.onnx' },
+  gpu: { encoder: 'encoder-model.onnx',      decoder: 'decoder_joint-model.int8.onnx' },
+};
+const manifestKey = (m) => `manifest/${m.replace(':', '-')}.json`;
+
+// ---------- Speicher (IndexedDB) ----------
+let dbPromise = null;
+function db() {
+  if (!dbPromise) dbPromise = new Promise((res, rej) => {
+    const r = indexedDB.open('offline-diktat', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('files');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbPromise;
+}
+async function idb(mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const tx = d.transaction('files', mode);
+    const req = fn(tx.objectStore('files'));
+    tx.oncomplete = () => res(req && req.result);
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error || new Error('Speichern abgebrochen (Speicher voll?)'));
+  });
+}
+const getFile = (k) => idb('readonly', s => s.get(k));
+const putFile = (k, v) => idb('readwrite', s => s.put(v, k));
+const allKeys = () => idb('readonly', s => s.getAllKeys());
+
+// Dateien aus einem gewählten Ordner (nur für diese Sitzung, zusätzlich in IndexedDB kopiert)
+const folderFiles = new Map();
+
+async function lookup(key) {
+  if (folderFiles.has(key)) return folderFiles.get(key);
+  try { return await getFile(key); } catch (e) { return undefined; }
+}
+
+// Hugging-Face-URL -> Speicher-Schlüssel
+function modelKey(url) {
+  const m = /^https:\/\/huggingface\.co\/(.+?)\/resolve\/[^/]+\/(.+)$/.exec(String(url));
+  return m ? `modelle/${m[1]}/${m[2]}` : null;
+}
+
+const post = (msg) => self.postMessage(msg);
+
+// ---------- Download mit Fortschritt ----------
+// Gibt null zurück, wenn die Datei auf dem Server nicht existiert (404) und optional ist.
+async function download(url, label, optional = false) {
+  let resp;
+  try { resp = await fetch(url); } catch (e) { throw new Error(`Keine Internetverbindung – „${label}“ konnte nicht geladen werden. Bitte einmal mit Internet herunterladen oder einen Offline-Paket-Ordner laden.`); }
+  if (resp.statusText === 'offline' && !optional) throw new Error(`Keine Internetverbindung – „${label}“ ist noch nicht offline gespeichert. Bitte einmal mit Internet herunterladen oder einen Offline-Paket-Ordner laden.`);
+  if (optional && resp.status === 404) return null;
+  if (!resp.ok) throw new Error(`Download fehlgeschlagen (${resp.status}): ${label}`);
+  const total = +resp.headers.get('content-length') || 0;
+  const reader = resp.body.getReader();
+  // Große Dateien in Teil-Blobs sammeln, damit nicht alles gleichzeitig im Arbeitsspeicher liegt
+  const parts = []; let chunks = []; let chunkBytes = 0; let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); chunkBytes += value.length; loaded += value.length;
+    if (chunkBytes > 32 * 1048576) { parts.push(new Blob(chunks)); chunks = []; chunkBytes = 0; }
+    post({ type: 'progress', file: label, loaded, total });
+  }
+  parts.push(new Blob(chunks));
+  return new Blob(parts);
+}
+
+// Datei aus Ordner/Browserspeicher holen, sonst herunterladen und speichern
+async function fetchStored(key, url, label, optional = false) {
+  let blob = await lookup(key);
+  if (!blob) {
+    blob = await download(url, label, optional);
+    if (blob) await putFile(key, blob);
+  }
+  return blob;
+}
+
+const getLib = (name) => fetchStored('lib/' + name, CDN + name, name);
+
+// ---------- Whisper laden ----------
+let T = null;            // transformers-Modul
+let asr = null;          // Pipeline
+let asrModel = null;
+let usedKeys = new Set();
+
+async function loadLib() {
+  if (T) return T;
+  post({ type: 'phase', text: 'Lade Programmbibliothek …' });
+  const [lib, mjs, wasm] = await Promise.all(LIB_FILES.map(getLib));
+  const libUrl = URL.createObjectURL(new Blob([lib], { type: 'text/javascript' }));
+  T = await import(libUrl);
+  const onnx = T.env.backends.onnx;
+  onnx.wasm.wasmPaths = {
+    mjs: URL.createObjectURL(new Blob([mjs], { type: 'text/javascript' })),
+    wasm: URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' })),
+  };
+  onnx.wasm.numThreads = 1;
+  onnx.wasm.proxy = false;
+
+  T.env.allowLocalModels = false;
+  T.env.allowRemoteModels = true;
+  T.env.useBrowserCache = false;
+  T.env.useCustomCache = true;
+  T.env.customCache = {
+    async match(url) {
+      const key = modelKey(url);
+      if (!key) return undefined;
+      const blob = await lookup(key);
+      if (!blob) return undefined;
+      usedKeys.add(key);
+      return new Response(blob, { headers: { 'content-length': String(blob.size) } });
+    },
+    async put(url, response) {
+      const key = modelKey(url);
+      if (!key) return;
+      const blob = await response.blob();
+      await putFile(key, blob);
+      usedKeys.add(key);
+    },
+  };
+  return T;
+}
+
+// Netzwerkfehler (offline) bei optionalen Modelldateien als 404 behandeln, statt abzubrechen.
+const realFetch = self.fetch.bind(self);
+self.fetch = async (input, init) => {
+  try { return await realFetch(input, init); }
+  catch (e) {
+    const url = typeof input === 'string' ? input : input.url;
+    if (modelKey(url)) { missingOffline.add(modelKey(url)); return new Response(null, { status: 404, statusText: 'offline' }); }
+    throw e;
+  }
+};
+const missingOffline = new Set();
+
+async function loadModel(model, pkLib) {
+  if (asrModel === model && (asr || pk)) { post({ type: 'ready', model }); return; }
+  if (model.startsWith('parakeet:')) return loadParakeet(model, pkLib);
+  await loadLib();
+  post({ type: 'phase', text: 'Lade Sprachmodell …' });
+  usedKeys = new Set(); missingOffline.clear();
+  if (asr) { try { await asr.dispose(); } catch (e) {} asr = null; asrModel = null; }
+  try {
+    asr = await T.pipeline('automatic-speech-recognition', model, {
+      dtype: 'q8',
+      device: 'wasm',
+      progress_callback: (p) => {
+        if (p.status === 'progress' && p.total) post({ type: 'progress', file: p.file, loaded: p.loaded, total: p.total });
+      },
+    });
+  } catch (e) {
+    if (missingOffline.size) throw new Error('Das Modell ist noch nicht offline verfügbar. Bitte einmal mit Internet herunterladen oder einen Offline-Paket-Ordner laden.');
+    throw e;
+  }
+  asrModel = model;
+  // Manifest merken: welche Dateien das Modell braucht (für Status & Export)
+  await putFile(manifestKey(model), new Blob([JSON.stringify([...usedKeys])], { type: 'application/json' }));
+  post({ type: 'ready', model });
+}
+
+// ---------- Parakeet v3 laden ----------
+let pk = null;           // ParakeetModel
+let PK = null;           // parakeet.js-Modul
+
+async function loadParakeet(model, pkLib) {
+  const variant = model.split(':')[1];
+  if (variant === 'gpu' && !('gpu' in navigator && await navigator.gpu.requestAdapter().catch(() => null))) {
+    throw new Error('Keine WebGPU-fähige Grafikkarte gefunden. Bitte „Parakeet v3 CPU“ wählen.');
+  }
+  if (!PK) {
+    post({ type: 'phase', text: 'Lade Programmbibliothek (Parakeet) …' });
+    const [ortJs, wasm] = [
+      await fetchStored(pkLibKey(PK_LIB[0]), ORT_CDN + PK_LIB[0], PK_LIB[0]),
+      await fetchStored(pkLibKey(PK_LIB[1]), ORT_CDN + PK_LIB[1], PK_LIB[1]),
+    ];
+    const ort = await import(URL.createObjectURL(new Blob([ortJs], { type: 'text/javascript' })));
+    ort.env.wasm.wasmPaths = { wasm: URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' })) };
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.proxy = false;
+    globalThis.__ORT_MODULE__ = ort;   // parakeet.js holt sich ONNX Runtime von hier
+    PK = await import(URL.createObjectURL(new Blob([pkLib], { type: 'text/javascript' })));
+  }
+
+  post({ type: 'phase', text: 'Lade Sprachmodell (Parakeet v3) …' });
+  const f = PK_FILES[variant];
+  const base = `https://huggingface.co/${PK_REPO}/resolve/main/`;
+  const key = (n) => `modelle/${PK_REPO}/${n}`;
+  // Manifest sagt, ob es externe .data-Dateien gibt (bei großen Modellen)
+  let manifest = null;
+  try { const mb = await lookup(manifestKey(model)); if (mb) manifest = JSON.parse(await mb.text()); } catch (e) {}
+  const get = async (n, optional) => {
+    if (optional && manifest && !manifest.includes(key(n))) return null;
+    return fetchStored(key(n), base + n, n, optional);
+  };
+  const vocab = await get('vocab.txt');
+  const encoder = await get(f.encoder);
+  const encoderData = await get(f.encoder + '.data', true);
+  const decoder = await get(f.decoder);
+  const decoderData = await get(f.decoder + '.data', true);
+
+  post({ type: 'phase', text: 'Starte Parakeet v3 … (kann beim ersten Mal etwas dauern)' });
+  const url = (b) => b ? URL.createObjectURL(b) : undefined;
+  if (pk) { try { await pk.dispose?.(); } catch (e) {} pk = null; }
+  asr = null;
+  pk = await PK.ParakeetModel.fromUrls({
+    encoderUrl: url(encoder), decoderUrl: url(decoder), tokenizerUrl: url(vocab),
+    encoderDataUrl: url(encoderData), decoderDataUrl: url(decoderData),
+    filenames: { encoder: f.encoder, decoder: f.decoder },
+    backend: variant === 'gpu' ? 'webgpu-hybrid' : 'wasm',
+    preprocessorBackend: 'js', nMels: 128, cpuThreads: 1,
+  });
+  asrModel = model;
+  const keys = [key('vocab.txt'), key(f.encoder), key(f.decoder)];
+  if (encoderData) keys.push(key(f.encoder + '.data'));
+  if (decoderData) keys.push(key(f.decoder + '.data'));
+  await putFile(manifestKey(model), new Blob([JSON.stringify(keys)], { type: 'application/json' }));
+  post({ type: 'ready', model });
+}
+
+// ---------- Status ----------
+async function status(models) {
+  const keys = new Set(await allKeys().catch(() => []));
+  for (const k of folderFiles.keys()) keys.add(k);
+  const lib = {
+    whisper: LIB_FILES.every(f => keys.has('lib/' + f)),
+    parakeet: PK_LIB.every(f => keys.has(pkLibKey(f))),
+  };
+  const out = {};
+  for (const m of models) {
+    const mk = manifestKey(m);
+    let ok = false;
+    if (keys.has(mk)) {
+      try {
+        const list = JSON.parse(await (await lookup(mk)).text());
+        ok = list.length > 0 && list.every(k => keys.has(k));
+      } catch (e) {}
+    }
+    out[m] = ok;
+  }
+  let est = null;
+  try { est = await navigator.storage.estimate(); } catch (e) {}
+  post({ type: 'status', lib, models: out, usage: est && est.usage });
+}
+
+// ---------- Erkennen ----------
+async function transcribe(id, audio, language) {
+  if (pk) {
+    const t0 = performance.now();
+    const r = await pk.transcribe(audio, 16000, { returnTimestamps: false, enableProfiling: false });
+    post({ type: 'result', id, text: (r && r.utterance_text) || '', ms: performance.now() - t0 });
+    return;
+  }
+  const opts = { task: 'transcribe', return_timestamps: false };
+  if (language && language !== 'auto') opts.language = language;
+  const t0 = performance.now();
+  const out = await asr(audio, opts);
+  post({ type: 'result', id, text: (out && out.text) || '', ms: performance.now() - t0 });
+}
+
+self.onmessage = async (ev) => {
+  const msg = ev.data;
+  try {
+    if (msg.type === 'status') await status(msg.models);
+    else if (msg.type === 'load') await loadModel(msg.model, msg.pkLib);
+    else if (msg.type === 'transcribe') await transcribe(msg.id, msg.audio, msg.language);
+    else if (msg.type === 'import') {
+      let n = 0;
+      for (const { key, file } of msg.files) {
+        folderFiles.set(key, file);
+        post({ type: 'phase', text: `Übernehme Dateien in den Browserspeicher … (${++n}/${msg.files.length})` });
+        try { await putFile(key, file); } catch (e) { /* bleibt für diese Sitzung im Speicher */ }
+      }
+      post({ type: 'imported', count: n });
+    } else if (msg.type === 'export') {
+      const keys = new Set(await allKeys());
+      for (const k of folderFiles.keys()) keys.add(k);
+      const files = [];
+      for (const k of keys) files.push({ key: k, blob: await lookup(k) });
+      post({ type: 'exportData', files });
+    }
+  } catch (e) {
+    post({ type: 'error', id: msg.id, op: msg.type, text: (e && e.message) || String(e) });
+  }
+};
+</script>
+
+<!-- ===================== Oberfläche ===================== -->
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const MODELS = [...$('modelSel').options].map(o => o.value);
+  const SR = 16000;
+
+  // ---------- Einstellungen merken ----------
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('diktat.' + k); return v === null ? d : v; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('diktat.' + k, v); } catch (e) {} },
+  };
+  $('modelSel').value = store.get('model', $('modelSel').value);
+  $('langSel').value = store.get('lang', 'german');
+  $('punctCmds').checked = store.get('punct', '0') === '1';
+  $('text').value = store.get('text', '');
+  $('text').addEventListener('input', () => store.set('text', $('text').value));
+  $('langSel').addEventListener('change', () => store.set('lang', $('langSel').value));
+  $('punctCmds').addEventListener('change', () => store.set('punct', $('punctCmds').checked ? '1' : '0'));
+
+  // ---------- Status-Anzeige ----------
+  function setStatus(text, kind) {
+    $('statusText').textContent = text;
+    $('statusDot').className = 'dot' + (kind ? ' ' + kind : '');
+  }
+  function setupMsg(text, cls) {
+    $('setupMsg').textContent = text || '';
+    $('setupMsg').className = 'small' + (cls ? ' ' + cls : '');
+  }
+  const fmtMB = (b) => (b / 1048576).toFixed(b > 104857600 ? 0 : 1) + ' MB';
+
+  // ---------- Worker ----------
+  // Whisper und Parakeet nutzen unterschiedliche ONNX-Runtime-Versionen,
+  // deshalb bekommt jede Modellfamilie ihren eigenen Hintergrundprozess.
+  const family = (m) => m.startsWith('parakeet:') ? 'parakeet' : 'whisper';
+  let worker = null, workerFamily = null;
+
+  let modelReady = null;   // Name des geladenen Modells
+  let loading = false;
+  let lastStatus = null;
+  const fileProgress = new Map();
+
+  function createWorker(fam) {
+    if (worker) worker.terminate();
+    pending.clear(); nextToInsert = nextId; updateQueue();
+    loading = false; modelReady = null;
+    try {
+      const code = $('workerCode').textContent;
+      worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+    } catch (e) {
+      worker = null;
+      setStatus('Dieser Browser wird nicht unterstützt', 'err');
+      setupMsg('Der Hintergrundprozess konnte nicht gestartet werden: ' + e.message + '\nBitte Chrome oder Edge verwenden.', 'err-t');
+      return false;
+    }
+    workerFamily = fam;
+    worker.onmessage = onWorkerMessage;
+    worker.onerror = (e) => { setStatus('Fehler im Hintergrundprozess', 'err'); setupMsg(e.message || String(e), 'err-t'); };
+    return true;
+  }
+
+  function requestStatus() { worker && worker.postMessage({ type: 'status', models: MODELS }); }
+
+  const optLabel = (x) => $('modelSel').querySelector(`option[value="${x}"]`).textContent.split(' – ')[0];
+
+  function renderStatus(s) {
+    lastStatus = s;
+    const m = $('modelSel').value;
+    const label = optLabel(m);
+    const li = (name, ok) => `<li><span>${name}</span><span class="${ok ? 'ok-t' : 'err-t'}">${ok ? '✓ offline verfügbar' : '✗ fehlt'}</span></li>`;
+    $('fileList').innerHTML =
+      li('Programmbibliothek Whisper (≈ 22 MB)' + (family(m) === 'whisper' ? ' (benötigt)' : ''), s.lib.whisper) +
+      li('Programmbibliothek Parakeet (≈ 25 MB)' + (family(m) === 'parakeet' ? ' (benötigt)' : ''), s.lib.parakeet) +
+      MODELS.map(x => li('Modell ' + optLabel(x) + (x === m ? ' (gewählt)' : ''), s.models[x])).join('') +
+      (s.usage ? `<li><span>Belegter Browserspeicher</span><span>${fmtMB(s.usage)}</span></li>` : '');
+    const ready = s.lib[family(m)] && s.models[m];
+    $('downloadBtn').textContent = ready ? `${label} ist offline bereit ✓` : `${label} einmalig herunterladen (Internet nötig)`;
+    $('downloadBtn').disabled = ready || loading;
+    $('exportBtn').disabled = !((s.lib.whisper || s.lib.parakeet) && Object.values(s.models).some(Boolean));
+    if (!ready) $('setupDetails').open = true;
+    return ready;
+  }
+
+  function showProgress(p) {
+    fileProgress.set(p.file, p);
+    let loaded = 0, total = 0;
+    for (const v of fileProgress.values()) { loaded += v.loaded; total += v.total || v.loaded; }
+    $('progress').style.display = 'block';
+    $('progress').firstElementChild.style.width = (total ? (100 * loaded / total) : 0).toFixed(1) + '%';
+    setupMsg(`Lade ${p.file} … ${fmtMB(loaded)}${total ? ' von ' + fmtMB(total) : ''}`);
+  }
+
+  function loadModel() {
+    if (loading) return;
+    const m = $('modelSel').value;
+    if (family(m) !== workerFamily && !createWorker(family(m))) return;
+    loading = true; modelReady = null;
+    fileProgress.clear();
+    $('recBtn').disabled = true;
+    $('downloadBtn').disabled = true;
+    setStatus('Lade Spracherkennung …', 'warn');
+    worker.postMessage({ type: 'load', model: m, pkLib: family(m) === 'parakeet' ? $('parakeetLib').textContent : undefined });
+  }
+
+  function onWorkerMessage(ev) {
+    const msg = ev.data;
+    switch (msg.type) {
+      case 'status': {
+        const ready = renderStatus(msg);
+        if (!modelReady && !loading) {
+          if (ready) loadModel();
+          else { setStatus('Einrichtung nötig – siehe oben', 'warn'); $('recBtn').disabled = true; }
+        }
+        break;
+      }
+      case 'phase': setStatus(msg.text, 'warn'); setupMsg(msg.text); break;
+      case 'progress': showProgress(msg); break;
+      case 'ready':
+        loading = false; modelReady = msg.model;
+        $('progress').style.display = 'none';
+        setupMsg('');
+        setStatus('Bereit – offline', 'ok');
+        $('recBtn').disabled = false;
+        requestStatus();
+        break;
+      case 'imported':
+        setupMsg(`${msg.count} Dateien übernommen.`, 'ok-t');
+        requestStatus();
+        break;
+      case 'result': onResult(msg); break;
+      case 'exportData': writeExport(msg.files); break;
+      case 'error':
+        if (msg.op === 'transcribe') { onResult({ id: msg.id, text: '', error: msg.text }); break; }
+        loading = false;
+        $('progress').style.display = 'none';
+        setStatus('Fehler', 'err');
+        setupMsg(msg.text, 'err-t');
+        $('setupDetails').open = true;
+        requestStatus();
+        break;
+    }
+  }
+
+  function updateLangField() {
+    const pkSel = family($('modelSel').value) === 'parakeet';
+    $('langSel').disabled = pkSel;
+    $('langField').title = pkSel ? 'Parakeet erkennt die Sprache automatisch (25 europäische Sprachen).' : '';
+  }
+
+  $('downloadBtn').onclick = loadModel;
+  $('modelSel').addEventListener('change', () => {
+    store.set('model', $('modelSel').value);
+    if (recording) stopRecording();
+    updateLangField();
+    // Laufenden Ladevorgang oder anderes Modell verwerfen: frischer Hintergrundprozess
+    if (!createWorker(family($('modelSel').value))) return;
+    $('recBtn').disabled = true;
+    requestStatus();
+  });
+
+  // ---------- Offline-Paket: Ordner laden ----------
+  $('folderBtn').onclick = () => $('folderInput').click();
+  $('folderInput').addEventListener('change', () => {
+    const files = [];
+    for (const f of $('folderInput').files) {
+      const parts = (f.webkitRelativePath || f.name).split('/');
+      const i = parts.findIndex(p => p === 'lib' || p === 'modelle' || p === 'manifest');
+      if (i >= 0) files.push({ key: parts.slice(i).join('/'), file: f });
+    }
+    $('folderInput').value = '';
+    if (!files.length) { setupMsg('In diesem Ordner wurde kein Offline-Paket gefunden (erwartet: Unterordner „dateien“ mit „lib“ und „modelle“).', 'err-t'); return; }
+    // Manifest-Dateien liegen im Paket als .../manifest/<modell>.json
+    worker.postMessage({ type: 'import', files });
+  });
+
+  // ---------- Offline-Paket: speichern ----------
+  let exportDir = null;
+  $('exportBtn').onclick = async () => {
+    if (!window.showDirectoryPicker) {
+      setupMsg('Das Speichern als Ordner geht nur in Chrome oder Edge. In diesem Browser bleiben die Dateien im Browserspeicher.', 'warn-t');
+      return;
+    }
+    try { exportDir = await showDirectoryPicker({ mode: 'readwrite' }); } catch (e) { return; }
+    setupMsg('Bereite Export vor …');
+    worker.postMessage({ type: 'export' });
+  };
+  async function writeExport(files) {
+    try {
+      const root = await exportDir.getDirectoryHandle('dateien', { create: true });
+      let n = 0;
+      for (const { key, blob } of files) {
+        if (!blob) continue;
+        const parts = key.split('/');
+        let dir = root;
+        for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
+        const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true });
+        const w = await fh.createWritable();
+        await w.write(blob); await w.close();
+        setupMsg(`Schreibe Dateien … ${++n}/${files.length}`);
+      }
+      setupMsg(`Fertig: ${n} Dateien in „${exportDir.name}/dateien“ gespeichert.\nKopiere diktat.html in denselben Ordner („${exportDir.name}“). Auf einem anderen Rechner: diktat.html öffnen → „Offline-Paket-Ordner laden …“ → Ordner „${exportDir.name}“ wählen.`, 'ok-t');
+    } catch (e) {
+      setupMsg('Export fehlgeschlagen: ' + e.message, 'err-t');
+    }
+  }
+
+  // ---------- Aufnahme & Pausenerkennung ----------
+  let recording = false, stream = null, ctx = null, proc = null, src = null;
+  let resampler = null;
+  let seg = [], segLen = 0, inSpeech = false, silentFor = 0, voicedFor = 0;
+  let preroll = [], prerollLen = 0;
+  let noise = 0.004;
+  const MIN_SILENCE = 0.75;   // Sekunden Pause, nach denen ein Abschnitt erkannt wird
+  const MAX_SEG = 25;          // max. Länge eines Abschnitts in Sekunden
+  const PREROLL = 0.35;
+
+  function makeResampler(inRate) {
+    const ratio = inRate / SR; let pos = 0;
+    return (input) => {
+      const out = new Float32Array(Math.floor((input.length - pos) / ratio) + 1);
+      let n = 0;
+      while (pos < input.length) {
+        const i = Math.floor(pos), f = pos - i;
+        const a = input[i];
+        const b = i + 1 < input.length ? input[i + 1] : a;
+        out[n++] = a + (b - a) * f;
+        pos += ratio;
+      }
+      pos -= input.length;
+      return out.subarray(0, n);
+    };
+  }
+
+  function flushSegment() {
+    if (voicedFor >= 0.3 && segLen > 0) {
+      const audio = new Float32Array(segLen);
+      let o = 0; for (const c of seg) { audio.set(c, o); o += c.length; }
+      enqueue(audio);
+    }
+    seg = []; segLen = 0; inSpeech = false; silentFor = 0; voicedFor = 0;
+  }
+
+  function onAudio(e) {
+    const chunk = resampler(e.inputBuffer.getChannelData(0));
+    if (!chunk.length) return;
+    let sum = 0; for (let i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i];
+    const rms = Math.sqrt(sum / chunk.length);
+    const dur = chunk.length / SR;
+    const thr = Math.max(0.01, noise * 3.2);
+    const voice = rms > thr;
+    if (!inSpeech && !voice) noise = noise * 0.95 + rms * 0.05;
+
+    const bar = $('meterBar');
+    bar.style.width = Math.min(100, rms * 600).toFixed(0) + '%';
+    bar.className = voice ? 'voice' : '';
+
+    const copy = new Float32Array(chunk);
+    if (!inSpeech) {
+      preroll.push(copy); prerollLen += copy.length;
+      while (prerollLen - preroll[0].length > PREROLL * SR) prerollLen -= preroll.shift().length;
+      if (voice) {
+        inSpeech = true; seg = preroll; segLen = prerollLen; preroll = []; prerollLen = 0;
+        voicedFor = dur; silentFor = 0;
+      }
+      return;
+    }
+    seg.push(copy); segLen += copy.length;
+    if (voice) { voicedFor += dur; silentFor = 0; } else silentFor += dur;
+    if (silentFor >= MIN_SILENCE || segLen >= MAX_SEG * SR) flushSegment();
+  }
+
+  async function startRecording() {
+    if (!modelReady) return;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    } catch (e) {
+      setStatus('Kein Mikrofonzugriff', 'err');
+      alert('Auf das Mikrofon konnte nicht zugegriffen werden.\nBitte den Zugriff im Browser erlauben (Schloss-/Kamerasymbol in der Adressleiste).\n\n' + e.message);
+      return;
+    }
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    src = ctx.createMediaStreamSource(stream);
+    proc = ctx.createScriptProcessor(4096, 1, 1);
+    resampler = makeResampler(ctx.sampleRate);
+    proc.onaudioprocess = onAudio;
+    src.connect(proc); proc.connect(ctx.destination);
+    seg = []; segLen = 0; inSpeech = false; preroll = []; prerollLen = 0;
+    recording = true;
+    $('recBtn').classList.add('recording');
+    $('recLabel').textContent = 'Diktat stoppen'; $('recIcon').textContent = '■';
+    setStatus('Aufnahme läuft – sprich jetzt', 'rec');
+    rememberCaret();
+  }
+
+  function stopRecording() {
+    if (!recording) return;
+    recording = false;
+    if (inSpeech) flushSegment();
+    try { proc.disconnect(); src.disconnect(); } catch (e) {}
+    stream.getTracks().forEach(t => t.stop());
+    ctx.close();
+    $('meterBar').style.width = '0%';
+    $('recBtn').classList.remove('recording');
+    $('recLabel').textContent = 'Diktat starten'; $('recIcon').textContent = '●';
+    setStatus(pending.size ? 'Erkenne restlichen Text …' : 'Bereit – offline', pending.size ? 'warn' : 'ok');
+  }
+
+  $('recBtn').onclick = () => recording ? stopRecording() : startRecording();
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.code === 'Space') { e.preventDefault(); if (!$('recBtn').disabled) $('recBtn').click(); }
+  });
+
+  // ---------- Warteschlange & Ergebnisse ----------
+  let nextId = 1, nextToInsert = 1;
+  const pending = new Map();  // id -> Ergebnis oder null
+  function enqueue(audio) {
+    const id = nextId++;
+    pending.set(id, null);
+    worker.postMessage({ type: 'transcribe', id, audio, language: $('langSel').value }, [audio.buffer]);
+    updateQueue();
+  }
+  function updateQueue() {
+    const n = [...pending.values()].filter(v => v === null).length;
+    $('queueInfo').textContent = n ? `⏳ Erkenne ${n} Abschnitt${n > 1 ? 'e' : ''} …` : '';
+    if (!n && !recording && modelReady) setStatus('Bereit – offline', 'ok');
+  }
+  function onResult(r) {
+    if (!pending.has(r.id)) return;
+    pending.set(r.id, r);
+    // Ergebnisse in der richtigen Reihenfolge einfügen
+    while (pending.has(nextToInsert) && pending.get(nextToInsert)) {
+      const res = pending.get(nextToInsert);
+      pending.delete(nextToInsert); nextToInsert++;
+      if (res.error) { $('queueInfo').textContent = '⚠️ ' + res.error; continue; }
+      insertText(cleanup(res.text));
+    }
+    updateQueue();
+  }
+
+  // Typische Whisper-Halluzinationen bei Stille/Geräuschen
+  const JUNK = [
+    /untertitel (im auftrag|der amara|von stephanie)/i, /amara\.org/i, /^\s*(vielen dank( fürs zuschauen)?|danke( schön)?|tschüss|bis zum nächsten mal)[.!]*\s*$/i,
+    /^\s*thanks? (you )?(for watching)?[.!]*\s*$/i, /^\s*\[?(musik|music|applaus|stille)\]?\s*$/i, /^\s*[.…,!?\-–\s]*$/,
+    /copyright|www\.|\.de\b|\.com\b/i,
+  ];
+  function cleanup(t) {
+    t = (t || '').replace(/\s+/g, ' ').trim();
+    if (JUNK.some(rx => rx.test(t))) return '';
+    // Absatz-Befehle
+    t = t.replace(/[\s,.]*\bneuer absatz\b[.,!?]?\s*/gi, '\n\n')
+         .replace(/[\s,.]*\b(neue|nächste) zeile\b[.,!?]?\s*/gi, '\n');
+    if ($('punctCmds').checked) {
+      const map = { komma: ',', punkt: '.', fragezeichen: '?', ausrufezeichen: '!', doppelpunkt: ':', semikolon: ';', bindestrich: '-' };
+      t = t.replace(/[\s,.]*\b(komma|punkt|fragezeichen|ausrufezeichen|doppelpunkt|semikolon|bindestrich)\b[.,!?]?/gi, (_, w) => map[w.toLowerCase()]);
+      t = t.replace(/([,.?!:;])(?=\S)/g, '$1 ').replace(/ ([,.?!:;])/g, '$1');
+    }
+    return t;
+  }
+
+  let caret = null;
+  function rememberCaret() {
+    const ta = $('text');
+    caret = document.activeElement === ta || ta.selectionStart !== ta.value.length ? ta.selectionEnd : ta.value.length;
+  }
+  $('text').addEventListener('click', () => { caret = $('text').selectionEnd; });
+  $('text').addEventListener('keyup', () => { caret = $('text').selectionEnd; });
+
+  function insertText(t) {
+    if (!t) return;
+    const ta = $('text');
+    let pos = caret == null || caret > ta.value.length ? ta.value.length : caret;
+    const before = ta.value.slice(0, pos), after = ta.value.slice(pos);
+    let ins = t;
+    if (before && !/[\s]$/.test(before) && !/^[\s,.?!:;]/.test(ins)) ins = ' ' + ins;
+    if (!before || /[.!?]\s*$|\n\s*$/.test(before)) ins = ins.replace(/^(\s*)(\p{Ll})/u, (_, s, c) => s + c.toUpperCase());
+    if (after && !/^\s/.test(after) && !/\s$/.test(ins)) ins += ' ';
+    ta.value = before + ins + after;
+    caret = pos + ins.length;
+    if (document.activeElement === ta) ta.setSelectionRange(caret, caret);
+    ta.scrollTop = ta.scrollHeight * (caret / Math.max(1, ta.value.length)) - ta.clientHeight / 2;
+    store.set('text', ta.value);
+  }
+
+  // ---------- Text-Aktionen ----------
+  $('copyBtn').onclick = async () => {
+    const ta = $('text');
+    try { await navigator.clipboard.writeText(ta.value); }
+    catch (e) { ta.select(); document.execCommand('copy'); }
+    $('copyBtn').textContent = '✓ Kopiert'; setTimeout(() => $('copyBtn').textContent = '📋 Kopieren', 1500);
+  };
+  $('saveBtn').onclick = () => {
+    const blob = new Blob([$('text').value.replace(/\n/g, '\r\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    const d = new Date();
+    a.download = `Diktat_${d.toISOString().slice(0, 10)}_${String(d.getHours()).padStart(2, '0')}-${String(d.getMinutes()).padStart(2, '0')}.txt`;
+    a.href = URL.createObjectURL(blob); a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  $('clearBtn').onclick = () => {
+    if ($('text').value && !confirm('Gesamten Text löschen?')) return;
+    $('text').value = ''; caret = 0; store.set('text', '');
+  };
+
+  // Speicher möglichst dauerhaft anfordern (damit der Browser die Modelle nicht löscht)
+  try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
+  updateLangField();
+  if (createWorker(family($('modelSel').value))) requestStatus();
+})();
+</script>
+</body>
+</html>
