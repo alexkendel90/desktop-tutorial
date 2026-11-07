@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diktat</title>
+<meta name="description" content="Diktieren mit Live-Vorschau, Fachbegriffen und KI-Textverbesserung – läuft komplett im Browser, auch offline.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#c2410c">
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6a66; --line: #e2e0da;
+    --accent: #c2410c; --accent-text: #ffffff; --ok: #15803d; --warn: #b45309; --err: #b91c1c;
+    --field: #fbfaf8; --live: #8a8882; --soft: #fff4ed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161614; --panel: #1f1f1d; --text: #ecebe7; --muted: #a09e98; --line: #34332f;
+      --accent: #f97316; --accent-text: #1a1206; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+      --field: #191917; --live: #8f8d87; --soft: #2a1d14;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161614; --panel: #1f1f1d; --text: #ecebe7; --muted: #a09e98; --line: #34332f;
+    --accent: #f97316; --accent-text: #1a1206; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+    --field: #191917; --live: #8f8d87; --soft: #2a1d14;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 1.45rem; margin: 0; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
+  h1 img { width: 30px; height: 30px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  .status { font-size: .9rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); }
+  .dot.rec { background: var(--err); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); }
+  select, button, input[type=text] { font: inherit; }
+  select, input[type=text] { background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; max-width: 100%; }
+  button { background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 13px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: .9rem; padding-bottom: 6px; }
+
+  .recbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 14px; }
+  #recBtn { min-width: 190px; padding: 13px 20px; font-size: 1.05rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+  #recBtn.recording { background: var(--err); border-color: var(--err); color: #fff; }
+  .meter { flex: 1; min-width: 120px; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .meter > div { height: 100%; width: 0%; background: var(--ok); transition: width 80ms linear; }
+  .meter > div.voice { background: var(--accent); }
+
+  .live {
+    margin-top: 12px; min-height: 3.2em; padding: 10px 12px; border-radius: 10px;
+    border: 1px dashed var(--line); background: var(--field); color: var(--live); font-size: 1.05rem;
+  }
+  .live .pend { color: var(--muted); }
+  .live .interim { font-style: italic; }
+  .live .cursor { display: inline-block; width: 2px; height: 1.1em; background: var(--accent); vertical-align: text-bottom; margin-left: 2px; animation: pulse 1s infinite; }
+  .live .placeholder { font-size: .9rem; }
+  #perf { font-size: .8rem; color: var(--muted); margin-top: 6px; min-height: 1.2em; }
+
+  textarea {
+    width: 100%; resize: vertical; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--field); color: var(--text);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #text { min-height: 300px; }
+  #terms { min-height: 150px; font: 15px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  textarea:focus, input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+  .spacer { flex: 1; }
+  .small { font-size: .85rem; color: var(--muted); }
+
+  .modes { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  #aiOut {
+    display: none; white-space: pre-wrap; margin-top: 10px; padding: 12px 14px; border-radius: 10px;
+    background: var(--soft); border: 1px solid var(--line); min-height: 3em;
+  }
+  #aiOut.busy::after { content: "▍"; color: var(--accent); animation: pulse 1s infinite; }
+  #aiActions { display: none; }
+  .custom { display: flex; gap: 8px; flex-wrap: wrap; }
+  .custom input { flex: 1; min-width: 200px; }
+
+  details > summary { cursor: pointer; font-weight: 600; }
+  .filelist { list-style: none; padding: 0; margin: 10px 0; }
+  .filelist li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--line); flex-wrap: wrap; }
+  .ok-t { color: var(--ok); } .err-t { color: var(--err); } .warn-t { color: var(--warn); }
+  .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
+  .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width 150ms; }
+  .msg { margin-top: 8px; white-space: pre-line; }
+  kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: .85em; }
+  ul.help { margin: 8px 0 0; padding-left: 20px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+  .two .panel { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1><img src="icon.svg" alt="">Diktat</h1>
+    <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Starte …</span></div>
+  </header>
+
+  <!-- Diktat -->
+  <section class="panel">
+    <div class="row">
+      <label class="field">Spracherkennung
+        <select id="modelSel">
+          <optgroup label="Whisper (OpenAI)">
+            <option value="Xenova/whisper-tiny">Whisper Tiny – sehr schnell, ungenau (≈ 40 MB)</option>
+            <option value="Xenova/whisper-base" selected>Whisper Base – schnell (≈ 80 MB)</option>
+            <option value="Xenova/whisper-small">Whisper Small – genau (≈ 250 MB)</option>
+          </optgroup>
+          <optgroup label="Parakeet v3 (NVIDIA)">
+            <option value="parakeet:cpu">Parakeet v3 CPU – sehr genau (≈ 700 MB)</option>
+            <option value="parakeet:gpu">Parakeet v3 GPU – sehr genau, Grafikkarte, experimentell (≈ 2,5 GB)</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="field" id="langField">Sprache
+        <select id="langSel">
+          <option value="de" selected>Deutsch</option>
+          <option value="en">Englisch</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="liveChk" checked> Live-Vorschau</label>
+      <label class="check" title="„Komma“, „Punkt“, „Fragezeichen“ … werden zu Satzzeichen"><input type="checkbox" id="punctCmds"> Satzzeichen per Sprachbefehl</label>
+    </div>
+    <div class="recbar">
+      <button id="recBtn" class="primary" disabled><span id="recIcon">●</span> <span id="recLabel">Diktat starten</span></button>
+      <div class="meter" title="Mikrofonpegel"><div id="meterBar"></div></div>
+    </div>
+    <div class="live" id="live" aria-live="polite"><span class="placeholder">Live-Vorschau: Hier erscheint der Text, während du sprichst.</span></div>
+    <div id="perf"></div>
+  </section>
+
+  <!-- Text -->
+  <section class="panel">
+    <textarea id="text" placeholder="Hier landet dein diktierter Text. Du kannst ihn jederzeit bearbeiten. Neuer Text wird an der Cursor-Position eingefügt."></textarea>
+    <div class="actions">
+      <button id="copyBtn">📋 Kopieren</button>
+      <button id="saveBtn">💾 Als .txt speichern</button>
+      <span class="spacer"></span>
+      <button id="undoBtn" disabled>↶ Rückgängig</button>
+      <button id="clearBtn">🗑️ Leeren</button>
+    </div>
+  </section>
+
+  <div class="two">
+    <!-- KI -->
+    <section class="panel">
+      <h2>✨ Text verbessern (KI, lokal)</h2>
+      <div class="small">Wirkt auf den markierten Text – oder auf den ganzen Text, wenn nichts markiert ist.</div>
+      <div class="modes">
+        <button data-mode="glaetten">Glätten</button>
+        <button data-mode="umformulieren">Umformulieren</button>
+        <button data-mode="prompt">Als KI-Prompt</button>
+        <button data-mode="email">Als E-Mail</button>
+      </div>
+      <div class="custom">
+        <input type="text" id="customInstr" placeholder="Eigene Anweisung, z. B. „Kürze auf drei Sätze“">
+        <button id="customBtn">Ausführen</button>
+      </div>
+      <div id="aiOut"></div>
+      <div class="actions" id="aiActions">
+        <button class="primary" id="aiApply">Übernehmen</button>
+        <button id="aiCopy">📋 Kopieren</button>
+        <button id="aiDiscard">Verwerfen</button>
+        <button id="aiStop">■ Stopp</button>
+        <span class="spacer"></span>
+        <span class="small" id="aiInfo"></span>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label class="field">KI-Modell
+          <select id="llmSel">
+            <option value="onnx-community/Qwen2.5-1.5B-Instruct" selected>Qwen 2.5 1.5B – Standard (≈ 1,2 GB)</option>
+            <option value="onnx-community/Qwen2.5-0.5B-Instruct">Qwen 2.5 0.5B – schneller, einfacher (≈ 0,5 GB)</option>
+          </select>
+        </label>
+      </div>
+      <div class="small" id="llmHint" style="margin-top:6px"></div>
+    </section>
+
+    <!-- Fachbegriffe -->
+    <section class="panel">
+      <h2>📚 Meine Fachbegriffe</h2>
+      <textarea id="terms" spellcheck="false" placeholder="Ein Begriff pro Zeile, z. B.:
+Kubernetes
+Dr. Schwarzwälder
+OKR-Planung
+
+Feste Korrekturen mit =>
+Kuba Netz => Kubernetes
+oh ka er, okay ar => OKR"></textarea>
+      <div class="small" style="margin-top:6px">
+        Begriffe werden der Spracherkennung als Hinweis mitgegeben (Whisper), ähnlich klingende Wörter werden automatisch korrigiert,
+        und die KI schreibt sie beim Überarbeiten exakt so. Zeilen mit <code>falsch =&gt; richtig</code> ersetzen immer.
+        Wird automatisch gespeichert.
+      </div>
+    </section>
+  </div>
+
+  <!-- Einrichtung -->
+  <section class="panel" style="margin-top:14px">
+    <details id="setupDetails">
+      <summary>Einrichtung, Offline-Nutzung &amp; Speicher</summary>
+      <p class="small">
+        Alles läuft in diesem Browser – Sprache und Text verlassen das Gerät nicht. Modelle werden nur beim ersten Mal
+        aus dem Internet geladen und danach im Browser gespeichert. Danach funktioniert die App auch offline.
+        Tipp: Über das Symbol in der Adressleiste („App installieren“) bekommt das Diktat ein eigenes Fenster.
+      </p>
+      <ul class="filelist" id="fileList"></ul>
+      <div class="actions">
+        <button class="primary" id="downloadBtn">Spracherkennung laden</button>
+        <button id="llmDownloadBtn">KI-Modell laden</button>
+        <span class="spacer"></span>
+        <button id="wipeBtn">Alle Modelle löschen</button>
+      </div>
+      <div class="progress" id="progress"><div></div></div>
+      <div id="setupMsg" class="small msg"></div>
+    </details>
+    <details style="margin-top:10px">
+      <summary class="small">Tipps &amp; Sprachbefehle</summary>
+      <ul class="help small">
+        <li>Sprich ganz normal. Die Live-Vorschau zeigt grau, was gerade erkannt wird. Nach einer kurzen Pause wird der Satz endgültig eingefügt.</li>
+        <li><b>„neue Zeile“</b> fügt einen Zeilenumbruch ein, <b>„neuer Absatz“</b> eine Leerzeile.</li>
+        <li>Mit aktivierten Satzzeichen-Befehlen: „Komma“, „Punkt“, „Fragezeichen“, „Ausrufezeichen“, „Doppelpunkt“.</li>
+        <li><kbd>Strg</kbd> + <kbd>Leertaste</kbd> startet/stoppt das Diktat.</li>
+        <li>In Word &amp; Co.: Text hier diktieren, mit „Kopieren“ übernehmen und dort mit <kbd>Strg</kbd> + <kbd>V</kbd> einfügen.</li>
+      </ul>
+    </details>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
