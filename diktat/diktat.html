@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline-Diktat</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --panel: #ffffff;
+    --text: #1d1d1b;
+    --muted: #6b6a66;
+    --line: #e2e0da;
+    --accent: #c2410c;
+    --accent-text: #ffffff;
+    --ok: #15803d;
+    --warn: #b45309;
+    --err: #b91c1c;
+    --field: #fbfaf8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161614;
+      --panel: #1f1f1d;
+      --text: #ecebe7;
+      --muted: #a09e98;
+      --line: #34332f;
+      --accent: #f97316;
+      --accent-text: #1a1206;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --err: #f87171;
+      --field: #191917;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161614; --panel: #1f1f1d; --text: #ecebe7; --muted: #a09e98; --line: #34332f;
+    --accent: #f97316; --accent-text: #1a1206; --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --field: #191917;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 1.5rem; margin: 0; letter-spacing: -0.01em; }
+  .status { font-size: .9rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); }
+  .dot.rec { background: var(--err); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); }
+  select, button { font: inherit; }
+  select { background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  button {
+    background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+
+  .recbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  #recBtn { min-width: 190px; padding: 14px 20px; font-size: 1.05rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+  #recBtn.recording { background: var(--err); border-color: var(--err); color: #fff; }
+  .meter { flex: 1; min-width: 120px; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .meter > div { height: 100%; width: 0%; background: var(--ok); transition: width 80ms linear; }
+  .meter > div.voice { background: var(--accent); }
+  #queueInfo { font-size: .9rem; color: var(--muted); min-height: 1.5em; }
+
+  textarea {
+    width: 100%; min-height: 340px; resize: vertical; padding: 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--field); color: var(--text);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .actions .spacer { flex: 1; }
+  .small { font-size: .85rem; color: var(--muted); }
+
+  details summary { cursor: pointer; font-weight: 600; }
+  .filelist { list-style: none; padding: 0; margin: 10px 0; }
+  .filelist li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  .ok-t { color: var(--ok); } .err-t { color: var(--err); } .warn-t { color: var(--warn); }
+  .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
+  .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width 150ms; }
+  #setupMsg { margin-top: 8px; white-space: pre-line; }
+  kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: .85em; }
+  ul.help { margin: 8px 0 0; padding-left: 20px; }
+  input[type=file] { display: none; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>🎙️ Offline-Diktat</h1>
+    <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Starte …</span></div>
+  </header>
+
+  <!-- Einrichtung -->
+  <section class="panel" id="setupPanel">
+    <details id="setupDetails">
+      <summary>Einrichtung &amp; Offline-Paket</summary>
+      <p class="small">
+        Die Spracherkennung (Whisper) läuft komplett in diesem Browser. Es wird nichts hochgeladen.
+        Die nötigen Dateien braucht es nur <b>einmal</b>. Danach liegen sie im Browserspeicher und alles funktioniert ohne Internet.
+      </p>
+      <ul class="filelist" id="fileList"></ul>
+      <div class="row">
+        <button class="primary" id="downloadBtn">Einmalig herunterladen (Internet nötig)</button>
+        <button id="folderBtn">Offline-Paket-Ordner laden …</button>
+        <button id="exportBtn" title="Speichert alle Dateien als Ordner, z. B. auf einen USB-Stick">Offline-Paket speichern …</button>
+        <input type="file" id="folderInput" webkitdirectory directory multiple>
+      </div>
+      <div class="progress" id="progress"><div></div></div>
+      <div id="setupMsg" class="small"></div>
+    </details>
+  </section>
+
+  <!-- Einstellungen + Aufnahme -->
+  <section class="panel">
+    <div class="row" style="margin-bottom:14px">
+      <label class="field">Modell
+        <select id="modelSel">
+          <option value="Xenova/whisper-tiny">Tiny – schnell, ungenauer (≈ 40 MB)</option>
+          <option value="Xenova/whisper-base" selected>Base – Standard (≈ 80 MB)</option>
+          <option value="Xenova/whisper-small">Small – genauer, langsamer (≈ 250 MB)</option>
+        </select>
+      </label>
+      <label class="field">Sprache
+        <select id="langSel">
+          <option value="german" selected>Deutsch</option>
+          <option value="english">Englisch</option>
+          <option value="auto">Automatisch erkennen</option>
+        </select>
+      </label>
+      <label class="check" title="„Komma“, „Punkt“, „Fragezeichen“ … werden zu Satzzeichen">
+        <input type="checkbox" id="punctCmds"> Satzzeichen per Sprachbefehl
+      </label>
+    </div>
+    <div class="recbar">
+      <button id="recBtn" class="primary" disabled><span id="recIcon">●</span> <span id="recLabel">Diktat starten</span></button>
+      <div class="meter" title="Mikrofonpegel"><div id="meterBar"></div></div>
+    </div>
+    <div id="queueInfo"></div>
+  </section>
+
+  <!-- Text -->
+  <section class="panel">
+    <textarea id="text" placeholder="Hier erscheint dein diktierter Text. Du kannst ihn jederzeit bearbeiten. Neuer Text wird an der Cursor-Position eingefügt."></textarea>
+    <div class="actions">
+      <button id="copyBtn">📋 Kopieren</button>
+      <button id="saveBtn">💾 Als .txt speichern</button>
+      <span class="spacer"></span>
+      <button id="clearBtn">🗑️ Leeren</button>
+    </div>
+    <details style="margin-top:12px">
+      <summary class="small">Tipps &amp; Sprachbefehle</summary>
+      <ul class="help small">
+        <li>Sprich in ganzen Sätzen und mach kurze Pausen. Nach jeder Pause wird der Abschnitt erkannt und eingefügt.</li>
+        <li><b>„neue Zeile“</b> fügt einen Zeilenumbruch ein, <b>„neuer Absatz“</b> eine Leerzeile.</li>
+        <li>Mit aktivierten Satzzeichen-Befehlen: „Komma“, „Punkt“, „Fragezeichen“, „Ausrufezeichen“, „Doppelpunkt“.</li>
+        <li>Tastenkürzel: <kbd>Strg</kbd> + <kbd>Leertaste</kbd> startet/stoppt das Diktat.</li>
+        <li>Der Text wird automatisch in diesem Browser zwischengespeichert.</li>
+      </ul>
+    </details>
+  </section>
+  <p class="small">Läuft am besten in Chrome oder Edge. Alle Daten bleiben auf diesem Gerät.</p>
+</main>
+
+<!-- ===================== Worker (Spracherkennung) ===================== -->
+<script type="text/plain" id="workerCode">
+const LIB_VERSION = '3.8.1';
+const CDN = `https://cdn.jsdelivr.net/npm/@huggingface/transformers@${LIB_VERSION}/dist/`;
+const LIB_FILES = ['transformers.min.js', 'ort-wasm-simd-threaded.jsep.mjs', 'ort-wasm-simd-threaded.jsep.wasm'];
+
+// ---------- Speicher (IndexedDB) ----------
+let dbPromise = null;
+function db() {
+  if (!dbPromise) dbPromise = new Promise((res, rej) => {
+    const r = indexedDB.open('offline-diktat', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('files');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbPromise;
+}
+async function idb(mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const tx = d.transaction('files', mode);
+    const req = fn(tx.objectStore('files'));
+    tx.oncomplete = () => res(req && req.result);
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error || new Error('Speichern abgebrochen (Speicher voll?)'));
+  });
+}
+const getFile = (k) => idb('readonly', s => s.get(k));
+const putFile = (k, v) => idb('readwrite', s => s.put(v, k));
+const allKeys = () => idb('readonly', s => s.getAllKeys());
+
+// Dateien aus einem gewählten Ordner (nur für diese Sitzung, zusätzlich in IndexedDB kopiert)
+const folderFiles = new Map();
+
+async function lookup(key) {
+  if (folderFiles.has(key)) return folderFiles.get(key);
+  try { return await getFile(key); } catch (e) { return undefined; }
+}
+
+// Hugging-Face-URL -> Speicher-Schlüssel
+function modelKey(url) {
+  const m = /^https:\/\/huggingface\.co\/(.+?)\/resolve\/[^/]+\/(.+)$/.exec(String(url));
+  return m ? `modelle/${m[1]}/${m[2]}` : null;
+}
+
+const post = (msg) => self.postMessage(msg);
+
+// ---------- Download mit Fortschritt ----------
+async function download(url, label) {
+  let resp;
+  try { resp = await fetch(url); } catch (e) { throw new Error(`Keine Internetverbindung – „${label}“ konnte nicht geladen werden.`); }
+  if (!resp.ok) throw new Error(`Download fehlgeschlagen (${resp.status}): ${label}`);
+  const total = +resp.headers.get('content-length') || 0;
+  const reader = resp.body.getReader();
+  const chunks = []; let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); loaded += value.length;
+    post({ type: 'progress', file: label, loaded, total });
+  }
+  return new Blob(chunks);
+}
+
+async function getLib(name) {
+  const key = 'lib/' + name;
+  let blob = await lookup(key);
+  if (!blob) {
+    blob = await download(CDN + name, name);
+    await putFile(key, blob);
+  }
+  return blob;
+}
+
+// ---------- Whisper laden ----------
+let T = null;            // transformers-Modul
+let asr = null;          // Pipeline
+let asrModel = null;
+let usedKeys = new Set();
+
+async function loadLib() {
+  if (T) return T;
+  post({ type: 'phase', text: 'Lade Programmbibliothek …' });
+  const [lib, mjs, wasm] = await Promise.all(LIB_FILES.map(getLib));
+  const libUrl = URL.createObjectURL(new Blob([lib], { type: 'text/javascript' }));
+  T = await import(libUrl);
+  const onnx = T.env.backends.onnx;
+  onnx.wasm.wasmPaths = {
+    mjs: URL.createObjectURL(new Blob([mjs], { type: 'text/javascript' })),
+    wasm: URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' })),
+  };
+  onnx.wasm.numThreads = 1;
+  onnx.wasm.proxy = false;
+
+  T.env.allowLocalModels = false;
+  T.env.allowRemoteModels = true;
+  T.env.useBrowserCache = false;
+  T.env.useCustomCache = true;
+  T.env.customCache = {
+    async match(url) {
+      const key = modelKey(url);
+      if (!key) return undefined;
+      const blob = await lookup(key);
+      if (!blob) return undefined;
+      usedKeys.add(key);
+      return new Response(blob, { headers: { 'content-length': String(blob.size) } });
+    },
+    async put(url, response) {
+      const key = modelKey(url);
+      if (!key) return;
+      const blob = await response.blob();
+      await putFile(key, blob);
+      usedKeys.add(key);
+    },
+  };
+  return T;
+}
+
+// Netzwerkfehler (offline) bei optionalen Modelldateien als 404 behandeln, statt abzubrechen.
+const realFetch = self.fetch.bind(self);
+self.fetch = async (input, init) => {
+  try { return await realFetch(input, init); }
+  catch (e) {
+    const url = typeof input === 'string' ? input : input.url;
+    if (modelKey(url)) { missingOffline.add(modelKey(url)); return new Response(null, { status: 404, statusText: 'offline' }); }
+    throw e;
+  }
+};
+const missingOffline = new Set();
+
+async function loadModel(model) {
+  if (asr && asrModel === model) { post({ type: 'ready', model }); return; }
+  await loadLib();
+  post({ type: 'phase', text: 'Lade Sprachmodell …' });
+  usedKeys = new Set(); missingOffline.clear();
+  if (asr) { try { await asr.dispose(); } catch (e) {} asr = null; asrModel = null; }
+  try {
+    asr = await T.pipeline('automatic-speech-recognition', model, {
+      dtype: 'q8',
+      device: 'wasm',
+      progress_callback: (p) => {
+        if (p.status === 'progress' && p.total) post({ type: 'progress', file: p.file, loaded: p.loaded, total: p.total });
+      },
+    });
+  } catch (e) {
+    if (missingOffline.size) throw new Error('Das Modell ist noch nicht offline verfügbar. Bitte einmal mit Internet herunterladen oder einen Offline-Paket-Ordner laden.');
+    throw e;
+  }
+  asrModel = model;
+  // Manifest merken: welche Dateien das Modell braucht (für Status & Export)
+  await putFile(`manifest/${model}.json`, new Blob([JSON.stringify([...usedKeys])], { type: 'application/json' }));
+  post({ type: 'ready', model });
+}
+
+// ---------- Status ----------
+async function status(models) {
+  const keys = new Set(await allKeys().catch(() => []));
+  for (const k of folderFiles.keys()) keys.add(k);
+  const lib = LIB_FILES.every(f => keys.has('lib/' + f));
+  const out = {};
+  for (const m of models) {
+    const mk = `manifest/${m}.json`;
+    let ok = false;
+    if (keys.has(mk)) {
+      try {
+        const list = JSON.parse(await (await lookup(mk)).text());
+        ok = list.length > 0 && list.every(k => keys.has(k));
+      } catch (e) {}
+    }
+    out[m] = ok;
+  }
+  let est = null;
+  try { est = await navigator.storage.estimate(); } catch (e) {}
+  post({ type: 'status', lib, models: out, usage: est && est.usage });
+}
+
+// ---------- Erkennen ----------
+async function transcribe(id, audio, language) {
+  const opts = { task: 'transcribe', return_timestamps: false };
+  if (language && language !== 'auto') opts.language = language;
+  const t0 = performance.now();
+  const out = await asr(audio, opts);
+  post({ type: 'result', id, text: (out && out.text) || '', ms: performance.now() - t0 });
+}
+
+self.onmessage = async (ev) => {
+  const msg = ev.data;
+  try {
+    if (msg.type === 'status') await status(msg.models);
+    else if (msg.type === 'load') await loadModel(msg.model);
+    else if (msg.type === 'transcribe') await transcribe(msg.id, msg.audio, msg.language);
+    else if (msg.type === 'import') {
+      let n = 0;
+      for (const { key, file } of msg.files) {
+        folderFiles.set(key, file);
+        post({ type: 'phase', text: `Übernehme Dateien in den Browserspeicher … (${++n}/${msg.files.length})` });
+        try { await putFile(key, file); } catch (e) { /* bleibt für diese Sitzung im Speicher */ }
+      }
+      post({ type: 'imported', count: n });
+    } else if (msg.type === 'export') {
+      const keys = new Set(await allKeys());
+      for (const k of folderFiles.keys()) keys.add(k);
+      const files = [];
+      for (const k of keys) files.push({ key: k, blob: await lookup(k) });
+      post({ type: 'exportData', files });
+    }
+  } catch (e) {
+    post({ type: 'error', id: msg.id, op: msg.type, text: (e && e.message) || String(e) });
+  }
+};
+</script>
+
+<!-- ===================== Oberfläche ===================== -->
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const MODELS = [...$('modelSel').options].map(o => o.value);
+  const SR = 16000;
+
+  // ---------- Einstellungen merken ----------
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('diktat.' + k); return v === null ? d : v; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('diktat.' + k, v); } catch (e) {} },
+  };
+  $('modelSel').value = store.get('model', $('modelSel').value);
+  $('langSel').value = store.get('lang', 'german');
+  $('punctCmds').checked = store.get('punct', '0') === '1';
+  $('text').value = store.get('text', '');
+  $('text').addEventListener('input', () => store.set('text', $('text').value));
+  $('langSel').addEventListener('change', () => store.set('lang', $('langSel').value));
+  $('punctCmds').addEventListener('change', () => store.set('punct', $('punctCmds').checked ? '1' : '0'));
+
+  // ---------- Status-Anzeige ----------
+  function setStatus(text, kind) {
+    $('statusText').textContent = text;
+    $('statusDot').className = 'dot' + (kind ? ' ' + kind : '');
+  }
+  function setupMsg(text, cls) {
+    $('setupMsg').textContent = text || '';
+    $('setupMsg').className = 'small' + (cls ? ' ' + cls : '');
+  }
+  const fmtMB = (b) => (b / 1048576).toFixed(b > 104857600 ? 0 : 1) + ' MB';
+
+  // ---------- Worker ----------
+  let worker;
+  try {
+    const code = $('workerCode').textContent;
+    worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+  } catch (e) {
+    setStatus('Dieser Browser wird nicht unterstützt', 'err');
+    setupMsg('Der Hintergrundprozess konnte nicht gestartet werden: ' + e.message + '\nBitte Chrome oder Edge verwenden.', 'err-t');
+    return;
+  }
+
+  let modelReady = null;   // Name des geladenen Modells
+  let loading = false;
+  let lastStatus = null;
+  const fileProgress = new Map();
+
+  function requestStatus() { worker.postMessage({ type: 'status', models: MODELS }); }
+
+  function renderStatus(s) {
+    lastStatus = s;
+    const m = $('modelSel').value;
+    const label = $('modelSel').selectedOptions[0].textContent.split(' – ')[0];
+    const li = (name, ok) => `<li><span>${name}</span><span class="${ok ? 'ok-t' : 'err-t'}">${ok ? '✓ offline verfügbar' : '✗ fehlt'}</span></li>`;
+    $('fileList').innerHTML =
+      li('Programmbibliothek (Whisper-Laufzeit, ≈ 22 MB)', s.lib) +
+      MODELS.map(x => li('Modell ' + $('modelSel').querySelector(`option[value="${x}"]`).textContent.split(' – ')[0] + (x === m ? ' (gewählt)' : ''), s.models[x])).join('') +
+      (s.usage ? `<li><span>Belegter Browserspeicher</span><span>${fmtMB(s.usage)}</span></li>` : '');
+    const ready = s.lib && s.models[m];
+    $('downloadBtn').textContent = ready ? `${label} ist offline bereit ✓` : `${label} einmalig herunterladen (Internet nötig)`;
+    $('downloadBtn').disabled = ready || loading;
+    $('exportBtn').disabled = !(s.lib && Object.values(s.models).some(Boolean));
+    if (!ready) $('setupDetails').open = true;
+    return ready;
+  }
+
+  function showProgress(p) {
+    fileProgress.set(p.file, p);
+    let loaded = 0, total = 0;
+    for (const v of fileProgress.values()) { loaded += v.loaded; total += v.total || v.loaded; }
+    $('progress').style.display = 'block';
+    $('progress').firstElementChild.style.width = (total ? (100 * loaded / total) : 0).toFixed(1) + '%';
+    setupMsg(`Lade ${p.file} … ${fmtMB(loaded)}${total ? ' von ' + fmtMB(total) : ''}`);
+  }
+
+  function loadModel() {
+    if (loading) return;
+    loading = true; modelReady = null;
+    fileProgress.clear();
+    $('recBtn').disabled = true;
+    $('downloadBtn').disabled = true;
+    setStatus('Lade Spracherkennung …', 'warn');
+    worker.postMessage({ type: 'load', model: $('modelSel').value });
+  }
+
+  worker.onmessage = (ev) => {
+    const msg = ev.data;
+    switch (msg.type) {
+      case 'status': {
+        const ready = renderStatus(msg);
+        if (!modelReady && !loading) {
+          if (ready) loadModel();
+          else { setStatus('Einrichtung nötig – siehe oben', 'warn'); $('recBtn').disabled = true; }
+        }
+        break;
+      }
+      case 'phase': setStatus(msg.text, 'warn'); setupMsg(msg.text); break;
+      case 'progress': showProgress(msg); break;
+      case 'ready':
+        loading = false; modelReady = msg.model;
+        $('progress').style.display = 'none';
+        setupMsg('');
+        setStatus('Bereit – offline', 'ok');
+        $('recBtn').disabled = false;
+        requestStatus();
+        break;
+      case 'imported':
+        setupMsg(`${msg.count} Dateien übernommen.`, 'ok-t');
+        requestStatus();
+        break;
+      case 'result': onResult(msg); break;
+      case 'exportData': writeExport(msg.files); break;
+      case 'error':
+        if (msg.op === 'transcribe') { onResult({ id: msg.id, text: '', error: msg.text }); break; }
+        loading = false;
+        $('progress').style.display = 'none';
+        setStatus('Fehler', 'err');
+        setupMsg(msg.text, 'err-t');
+        $('setupDetails').open = true;
+        requestStatus();
+        break;
+    }
+  };
+  worker.onerror = (e) => { setStatus('Fehler im Hintergrundprozess', 'err'); setupMsg(e.message || String(e), 'err-t'); };
+
+  $('downloadBtn').onclick = loadModel;
+  $('modelSel').addEventListener('change', () => {
+    store.set('model', $('modelSel').value);
+    if (recording) stopRecording();
+    modelReady = null;
+    $('recBtn').disabled = true;
+    requestStatus();
+  });
+
+  // ---------- Offline-Paket: Ordner laden ----------
+  $('folderBtn').onclick = () => $('folderInput').click();
+  $('folderInput').addEventListener('change', () => {
+    const files = [];
+    for (const f of $('folderInput').files) {
+      const parts = (f.webkitRelativePath || f.name).split('/');
+      const i = parts.findIndex(p => p === 'lib' || p === 'modelle' || p === 'manifest');
+      if (i >= 0) files.push({ key: parts.slice(i).join('/'), file: f });
+    }
+    $('folderInput').value = '';
+    if (!files.length) { setupMsg('In diesem Ordner wurde kein Offline-Paket gefunden (erwartet: Unterordner „dateien“ mit „lib“ und „modelle“).', 'err-t'); return; }
+    // Manifest-Dateien liegen im Paket als .../manifest/<modell>.json
+    worker.postMessage({ type: 'import', files });
+  });
+
+  // ---------- Offline-Paket: speichern ----------
+  let exportDir = null;
+  $('exportBtn').onclick = async () => {
+    if (!window.showDirectoryPicker) {
+      setupMsg('Das Speichern als Ordner geht nur in Chrome oder Edge. In diesem Browser bleiben die Dateien im Browserspeicher.', 'warn-t');
+      return;
+    }
+    try { exportDir = await showDirectoryPicker({ mode: 'readwrite' }); } catch (e) { return; }
+    setupMsg('Bereite Export vor …');
+    worker.postMessage({ type: 'export' });
+  };
+  async function writeExport(files) {
+    try {
+      const root = await exportDir.getDirectoryHandle('dateien', { create: true });
+      let n = 0;
+      for (const { key, blob } of files) {
+        if (!blob) continue;
+        const parts = key.split('/');
+        let dir = root;
+        for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
+        const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true });
+        const w = await fh.createWritable();
+        await w.write(blob); await w.close();
+        setupMsg(`Schreibe Dateien … ${++n}/${files.length}`);
+      }
+      setupMsg(`Fertig: ${n} Dateien in „${exportDir.name}/dateien“ gespeichert.\nKopiere diktat.html in denselben Ordner („${exportDir.name}“). Auf einem anderen Rechner: diktat.html öffnen → „Offline-Paket-Ordner laden …“ → Ordner „${exportDir.name}“ wählen.`, 'ok-t');
+    } catch (e) {
+      setupMsg('Export fehlgeschlagen: ' + e.message, 'err-t');
+    }
+  }
+
+  // ---------- Aufnahme & Pausenerkennung ----------
+  let recording = false, stream = null, ctx = null, proc = null, src = null;
+  let resampler = null;
+  let seg = [], segLen = 0, inSpeech = false, silentFor = 0, voicedFor = 0;
+  let preroll = [], prerollLen = 0;
+  let noise = 0.004;
+  const MIN_SILENCE = 0.75;   // Sekunden Pause, nach denen ein Abschnitt erkannt wird
+  const MAX_SEG = 25;          // max. Länge eines Abschnitts in Sekunden
+  const PREROLL = 0.35;
+
+  function makeResampler(inRate) {
+    const ratio = inRate / SR; let pos = 0;
+    return (input) => {
+      const out = new Float32Array(Math.floor((input.length - pos) / ratio) + 1);
+      let n = 0;
+      while (pos < input.length) {
+        const i = Math.floor(pos), f = pos - i;
+        const a = input[i];
+        const b = i + 1 < input.length ? input[i + 1] : a;
+        out[n++] = a + (b - a) * f;
+        pos += ratio;
+      }
+      pos -= input.length;
+      return out.subarray(0, n);
+    };
+  }
+
+  function flushSegment() {
+    if (voicedFor >= 0.3 && segLen > 0) {
+      const audio = new Float32Array(segLen);
+      let o = 0; for (const c of seg) { audio.set(c, o); o += c.length; }
+      enqueue(audio);
+    }
+    seg = []; segLen = 0; inSpeech = false; silentFor = 0; voicedFor = 0;
+  }
+
+  function onAudio(e) {
+    const chunk = resampler(e.inputBuffer.getChannelData(0));
+    if (!chunk.length) return;
+    let sum = 0; for (let i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i];
+    const rms = Math.sqrt(sum / chunk.length);
+    const dur = chunk.length / SR;
+    const thr = Math.max(0.01, noise * 3.2);
+    const voice = rms > thr;
+    if (!inSpeech && !voice) noise = noise * 0.95 + rms * 0.05;
+
+    const bar = $('meterBar');
+    bar.style.width = Math.min(100, rms * 600).toFixed(0) + '%';
+    bar.className = voice ? 'voice' : '';
+
+    const copy = new Float32Array(chunk);
+    if (!inSpeech) {
+      preroll.push(copy); prerollLen += copy.length;
+      while (prerollLen - preroll[0].length > PREROLL * SR) prerollLen -= preroll.shift().length;
+      if (voice) {
+        inSpeech = true; seg = preroll; segLen = prerollLen; preroll = []; prerollLen = 0;
+        voicedFor = dur; silentFor = 0;
+      }
+      return;
+    }
+    seg.push(copy); segLen += copy.length;
+    if (voice) { voicedFor += dur; silentFor = 0; } else silentFor += dur;
+    if (silentFor >= MIN_SILENCE || segLen >= MAX_SEG * SR) flushSegment();
+  }
+
+  async function startRecording() {
+    if (!modelReady) return;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    } catch (e) {
+      setStatus('Kein Mikrofonzugriff', 'err');
+      alert('Auf das Mikrofon konnte nicht zugegriffen werden.\nBitte den Zugriff im Browser erlauben (Schloss-/Kamerasymbol in der Adressleiste).\n\n' + e.message);
+      return;
+    }
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    src = ctx.createMediaStreamSource(stream);
+    proc = ctx.createScriptProcessor(4096, 1, 1);
+    resampler = makeResampler(ctx.sampleRate);
+    proc.onaudioprocess = onAudio;
+    src.connect(proc); proc.connect(ctx.destination);
+    seg = []; segLen = 0; inSpeech = false; preroll = []; prerollLen = 0;
+    recording = true;
+    $('recBtn').classList.add('recording');
+    $('recLabel').textContent = 'Diktat stoppen'; $('recIcon').textContent = '■';
+    setStatus('Aufnahme läuft – sprich jetzt', 'rec');
+    rememberCaret();
+  }
+
+  function stopRecording() {
+    if (!recording) return;
+    recording = false;
+    if (inSpeech) flushSegment();
+    try { proc.disconnect(); src.disconnect(); } catch (e) {}
+    stream.getTracks().forEach(t => t.stop());
+    ctx.close();
+    $('meterBar').style.width = '0%';
+    $('recBtn').classList.remove('recording');
+    $('recLabel').textContent = 'Diktat starten'; $('recIcon').textContent = '●';
+    setStatus(pending.size ? 'Erkenne restlichen Text …' : 'Bereit – offline', pending.size ? 'warn' : 'ok');
+  }
+
+  $('recBtn').onclick = () => recording ? stopRecording() : startRecording();
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.code === 'Space') { e.preventDefault(); if (!$('recBtn').disabled) $('recBtn').click(); }
+  });
+
+  // ---------- Warteschlange & Ergebnisse ----------
+  let nextId = 1, nextToInsert = 1;
+  const pending = new Map();  // id -> Ergebnis oder null
+  function enqueue(audio) {
+    const id = nextId++;
+    pending.set(id, null);
+    worker.postMessage({ type: 'transcribe', id, audio, language: $('langSel').value }, [audio.buffer]);
+    updateQueue();
+  }
+  function updateQueue() {
+    const n = [...pending.values()].filter(v => v === null).length;
+    $('queueInfo').textContent = n ? `⏳ Erkenne ${n} Abschnitt${n > 1 ? 'e' : ''} …` : '';
+    if (!n && !recording && modelReady) setStatus('Bereit – offline', 'ok');
+  }
+  function onResult(r) {
+    if (!pending.has(r.id)) return;
+    pending.set(r.id, r);
+    // Ergebnisse in der richtigen Reihenfolge einfügen
+    while (pending.has(nextToInsert) && pending.get(nextToInsert)) {
+      const res = pending.get(nextToInsert);
+      pending.delete(nextToInsert); nextToInsert++;
+      if (res.error) { $('queueInfo').textContent = '⚠️ ' + res.error; continue; }
+      insertText(cleanup(res.text));
+    }
+    updateQueue();
+  }
+
+  // Typische Whisper-Halluzinationen bei Stille/Geräuschen
+  const JUNK = [
+    /untertitel (im auftrag|der amara|von stephanie)/i, /amara\.org/i, /^\s*(vielen dank( fürs zuschauen)?|danke( schön)?|tschüss|bis zum nächsten mal)[.!]*\s*$/i,
+    /^\s*thanks? (you )?(for watching)?[.!]*\s*$/i, /^\s*\[?(musik|music|applaus|stille)\]?\s*$/i, /^\s*[.…,!?\-–\s]*$/,
+    /copyright|www\.|\.de\b|\.com\b/i,
+  ];
+  function cleanup(t) {
+    t = (t || '').replace(/\s+/g, ' ').trim();
+    if (JUNK.some(rx => rx.test(t))) return '';
+    // Absatz-Befehle
+    t = t.replace(/[\s,.]*\bneuer absatz\b[.,!?]?\s*/gi, '\n\n')
+         .replace(/[\s,.]*\b(neue|nächste) zeile\b[.,!?]?\s*/gi, '\n');
+    if ($('punctCmds').checked) {
+      const map = { komma: ',', punkt: '.', fragezeichen: '?', ausrufezeichen: '!', doppelpunkt: ':', semikolon: ';', bindestrich: '-' };
+      t = t.replace(/[\s,.]*\b(komma|punkt|fragezeichen|ausrufezeichen|doppelpunkt|semikolon|bindestrich)\b[.,!?]?/gi, (_, w) => map[w.toLowerCase()]);
+      t = t.replace(/([,.?!:;])(?=\S)/g, '$1 ').replace(/ ([,.?!:;])/g, '$1');
+    }
+    return t;
+  }
+
+  let caret = null;
+  function rememberCaret() {
+    const ta = $('text');
+    caret = document.activeElement === ta || ta.selectionStart !== ta.value.length ? ta.selectionEnd : ta.value.length;
+  }
+  $('text').addEventListener('click', () => { caret = $('text').selectionEnd; });
+  $('text').addEventListener('keyup', () => { caret = $('text').selectionEnd; });
+
+  function insertText(t) {
+    if (!t) return;
+    const ta = $('text');
+    let pos = caret == null || caret > ta.value.length ? ta.value.length : caret;
+    const before = ta.value.slice(0, pos), after = ta.value.slice(pos);
+    let ins = t;
+    if (before && !/[\s]$/.test(before) && !/^[\s,.?!:;]/.test(ins)) ins = ' ' + ins;
+    if (!before || /[.!?]\s*$|\n\s*$/.test(before)) ins = ins.replace(/^(\s*)(\p{Ll})/u, (_, s, c) => s + c.toUpperCase());
+    if (after && !/^\s/.test(after) && !/\s$/.test(ins)) ins += ' ';
+    ta.value = before + ins + after;
+    caret = pos + ins.length;
+    if (document.activeElement === ta) ta.setSelectionRange(caret, caret);
+    ta.scrollTop = ta.scrollHeight * (caret / Math.max(1, ta.value.length)) - ta.clientHeight / 2;
+    store.set('text', ta.value);
+  }
+
+  // ---------- Text-Aktionen ----------
+  $('copyBtn').onclick = async () => {
+    const ta = $('text');
+    try { await navigator.clipboard.writeText(ta.value); }
+    catch (e) { ta.select(); document.execCommand('copy'); }
+    $('copyBtn').textContent = '✓ Kopiert'; setTimeout(() => $('copyBtn').textContent = '📋 Kopieren', 1500);
+  };
+  $('saveBtn').onclick = () => {
+    const blob = new Blob([$('text').value.replace(/\n/g, '\r\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    const d = new Date();
+    a.download = `Diktat_${d.toISOString().slice(0, 10)}_${String(d.getHours()).padStart(2, '0')}-${String(d.getMinutes()).padStart(2, '0')}.txt`;
+    a.href = URL.createObjectURL(blob); a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  $('clearBtn').onclick = () => {
+    if ($('text').value && !confirm('Gesamten Text löschen?')) return;
+    $('text').value = ''; caret = 0; store.set('text', '');
+  };
+
+  // Speicher möglichst dauerhaft anfordern (damit der Browser die Modelle nicht löscht)
+  try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
+  requestStatus();
+})();
+</script>
+</body>
+</html>
