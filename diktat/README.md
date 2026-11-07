@@ -18,11 +18,15 @@ Ab dann funktioniert alles **ohne Internet**.
 
 | Modell | Download | Hinweis |
 |---|---|---|
-| Tiny  | ≈ 40 MB  | schnell, für Deutsch eher ungenau |
-| Base  | ≈ 80 MB  | Standard |
-| Small | ≈ 250 MB | deutlich genauer, braucht einen flotten PC |
+| Whisper Tiny  | ≈ 40 MB  | schnell, für Deutsch eher ungenau |
+| Whisper Base  | ≈ 80 MB  | Standard |
+| Whisper Small | ≈ 250 MB | deutlich genauer, braucht einen flotten PC |
+| Parakeet v3 CPU | ≈ 700 MB | NVIDIA Parakeet TDT 0.6B v3: sehr genau, erkennt die Sprache selbst (25 europäische Sprachen), auf dem Prozessor langsamer |
+| Parakeet v3 GPU | ≈ 2,5 GB | wie oben, aber über die Grafikkarte (WebGPU) schnell; experimentell |
 
-Dazu kommt einmalig die Laufzeit-Bibliothek (≈ 22 MB).
+Die Größen sind ungefähre Angaben. Dazu kommt einmalig die passende Laufzeit-Bibliothek (Whisper ≈ 22 MB, Parakeet ≈ 25 MB).
+Parakeet läuft über [parakeet.js](https://github.com/ysdede/parakeet.js) (MIT-Lizenz, in `diktat.html` eingebettet)
+mit dem Modell [`ysdede/parakeet-tdt-0.6b-v3-onnx`](https://huggingface.co/ysdede/parakeet-tdt-0.6b-v3-onnx) (CC-BY-4.0).
 
 ## Für Rechner ganz ohne Internet (USB-Stick)
 
