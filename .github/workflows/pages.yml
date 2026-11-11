@@ -29,6 +29,7 @@ jobs:
           cp -r diktat/web/. _site/
           # Einzeldatei-Version (für USB-Stick / ganz ohne Webadresse) zum Herunterladen dazulegen
           cp diktat/diktat.html _site/diktat-offline.html
+          cp diktat/diktat-einfach.html _site/diktat-einfach.html
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
