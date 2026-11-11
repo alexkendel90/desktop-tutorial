@@ -145,7 +145,7 @@ function flush() {
     const id = nextId++;
     pending.set(id, null);
     const audio = joinSeg();
-    worker.postMessage({ type: 'transcribe', id, live: false, audio, lang: 'de' }, [audio.buffer]);
+    worker.postMessage({ type: 'transcribe', id, live: false, audio, lang: 'de', terms: termPrompt }, [audio.buffer]);
   }
   seg = []; segLen = 0; inSpeech = false; silentFor = 0; voicedFor = 0; segNo++; lastLiveAt = 0;
 }
@@ -173,28 +173,48 @@ function onAudio(e) {
   if (!liveBusy && voicedFor >= 0.8 && secs - lastLiveAt >= LIVE_EVERY) {
     lastLiveAt = secs; liveBusy = true;
     const audio = joinSeg();
-    worker.postMessage({ type: 'transcribe', id: -segNo - 1, live: true, audio, lang: 'de' }, [audio.buffer]);
+    worker.postMessage({ type: 'transcribe', id: -segNo - 1, live: true, audio, lang: 'de', terms: termPrompt }, [audio.buffer]);
   }
 }
 
-async function start() {
-  if (!ready || recording) return;
+// Das Mikrofon bleibt geöffnet, solange die Seite offen ist (sonst fragt der Browser bei lokalen Dateien jedes Mal neu).
+// Zwischen den Diktaten wird nichts ausgewertet; nach 15 Minuten ohne Diktat wird es freigegeben.
+const MIC_IDLE_MS = 15 * 60 * 1000;
+let idleTimer = null;
+async function ensureMic() {
+  if (stream && stream.getAudioTracks().some(t => t.readyState === 'live') && ctx && ctx.state !== 'closed') return true;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
   } catch (e) {
     setStatus('Kein Mikrofonzugriff', 'err');
     alert('Bitte den Mikrofonzugriff im Browser erlauben (Symbol in der Adressleiste).\n\n' + e.message);
-    return;
+    return false;
   }
-  // Neues Diktat: vorheriges in den Verlauf, Textfeld leeren
-  if ($('text').value.trim()) addHistory($('text').value.trim());
-  $('text').value = ''; $('live').textContent = ''; $('clip').textContent = '';
   ctx = new (window.AudioContext || window.webkitAudioContext)();
   src = ctx.createMediaStreamSource(stream);
   proc = ctx.createScriptProcessor(2048, 1, 1);
   resampler = makeResampler(ctx.sampleRate);
-  proc.onaudioprocess = onAudio;
+  proc.onaudioprocess = (e) => { if (recording) onAudio(e); };
   src.connect(proc); proc.connect(ctx.destination);
+  return true;
+}
+function releaseMic() {
+  if (recording) return;
+  try { proc.disconnect(); src.disconnect(); } catch (e) {}
+  stream?.getTracks().forEach(t => t.stop());
+  try { ctx?.close(); } catch (e) {}
+  stream = ctx = proc = src = null;
+}
+
+async function start() {
+  if (!ready || recording) return;
+  clearTimeout(idleTimer);
+  if (!(await ensureMic())) return;
+  await ctx.resume();
+  // Neues Diktat: vorheriges in den Verlauf, Textfeld leeren
+  if ($('text').value.trim()) addHistory($('text').value.trim());
+  $('text').value = ''; $('live').textContent = ''; $('clip').textContent = '';
+  resampler = makeResampler(ctx.sampleRate);
   seg = []; segLen = 0; inSpeech = false; preroll = []; prerollLen = 0;
   recording = true;
   $('recBtn').classList.add('recording'); $('recBtn').textContent = '■';
@@ -206,9 +226,9 @@ function stop() {
   if (!recording) return;
   recording = false;
   if (inSpeech) flush();
-  try { proc.disconnect(); src.disconnect(); } catch (e) {}
-  stream.getTracks().forEach(t => t.stop());
-  ctx.close();
+  ctx.suspend().catch(() => {});
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(releaseMic, MIC_IDLE_MS);
   $('meterBar').style.width = '0%';
   $('recBtn').classList.remove('recording'); $('recBtn').textContent = '🎙️';
   $('hint').textContent = 'Klicken und sprechen. Nochmal klicken zum Beenden. Der Text wird dann automatisch kopiert.';
@@ -219,6 +239,134 @@ $('recBtn').onclick = () => recording ? stop() : start();
 document.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.code === 'Space') { e.preventDefault(); if (!$('recBtn').disabled) $('recBtn').click(); }
 });
+
+// ---------------------------------------------------------------- Glossar
+// Eigene Wörter: werden Whisper als Hinweis mitgegeben und ähnlich klingende Wörter automatisch korrigiert.
+// Zeilen „falsch => richtig“ ersetzen immer.
+let TERMS = [];   // { text, words:[...], norm, code }
+let RULES = [];   // { re, to }
+let termPrompt = '';
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normWord = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+function koeln(word) {
+  // Kölner Phonetik: gleich klingende deutsche Wörter bekommen denselben Code
+  const w = word.toLowerCase().replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 's').replace(/[^a-z]/g, '');
+  let out = '';
+  for (let i = 0; i < w.length; i++) {
+    const c = w[i], p = w[i - 1] || '', n = w[i + 1] || '';
+    let k = '';
+    if ('aeijouy'.includes(c)) k = '0';
+    else if (c === 'h') k = '';
+    else if (c === 'b') k = '1';
+    else if (c === 'p') k = n === 'h' ? '3' : '1';
+    else if (c === 'd' || c === 't') k = 'csz'.includes(n) ? '8' : '2';
+    else if ('fvw'.includes(c)) k = '3';
+    else if ('gkq'.includes(c)) k = '4';
+    else if (c === 'c') k = i === 0 ? ('ahkloqrux'.includes(n) ? '4' : '8') : ('sz'.includes(p) ? '8' : ('ahkoqux'.includes(n) ? '4' : '8'));
+    else if (c === 'x') k = 'ckq'.includes(p) ? '8' : '48';
+    else if (c === 'l') k = '5';
+    else if (c === 'm' || c === 'n') k = '6';
+    else if (c === 'r') k = '7';
+    else if (c === 's' || c === 'z') k = '8';
+    out += k;
+  }
+  let r = '';
+  for (let i = 0; i < out.length; i++) if (out[i] !== out[i - 1]) r += out[i];
+  return r[0] + r.slice(1).replace(/0/g, '');
+}
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  if (!m || !n) return m || n;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+const sim = (a, b) => 1 - lev(a, b) / Math.max(a.length, b.length);
+
+function parseTerms() {
+  TERMS = []; RULES = [];
+  const seen = new Set();
+  const addTerm = (t) => {
+    t = t.trim();
+    if (!t || seen.has(t.toLowerCase())) return;
+    seen.add(t.toLowerCase());
+    const words = t.split(/\s+/);
+    const norm = words.map(normWord).join(' ');
+    TERMS.push({ text: t, words, norm, code: koeln(norm.replace(/ /g, '')) });
+  };
+  for (let line of termsText().split(/\r?\n/)) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = line.split(/\s*=>\s*/);
+    if (m.length === 2 && m[1]) {
+      for (const src of m[0].split(',').map(s => s.trim()).filter(Boolean)) {
+        RULES.push({ re: new RegExp(`(?<![\\p{L}\\p{N}])${esc(src)}(?![\\p{L}\\p{N}])`, 'giu'), to: m[1].trim() });
+      }
+      addTerm(m[1]);
+    } else addTerm(line);
+  }
+  termPrompt = TERMS.length ? 'Fachbegriffe: ' + TERMS.map(t => t.text).join(', ') + '.' : '';
+}
+
+function applyTerms(text) {
+  for (const r of RULES) text = text.replace(r.re, r.to);
+  if (!TERMS.length) return text;
+  const words = [...text.matchAll(/[\p{L}\p{N}][\p{L}\p{N}'’.-]*[\p{L}\p{N}]|[\p{L}\p{N}]/gu)].map(m => ({ w: m[0], s: m.index, e: m.index + m[0].length }));
+  const repl = [];
+  for (let i = 0; i < words.length; i++) {
+    let best = null;
+    for (const t of TERMS) {
+      const n = t.words.length;
+      if (i + n > words.length) continue;
+      // nur zusammenhängende Wörter (keine Satzzeichen dazwischen)
+      let ok = true;
+      for (let j = i; j < i + n - 1; j++) if (!/^\s+$/.test(text.slice(words[j].e, words[j + 1].s))) { ok = false; break; }
+      if (!ok) continue;
+      const cand = words.slice(i, i + n).map(x => normWord(x.w)).join(' ');
+      const original = text.slice(words[i].s, words[i + n - 1].e);
+      if (original === t.text) { best = null; break; }
+      let score = 0;
+      if (cand === t.norm) score = 2;
+      else if (t.norm.length >= 4) {
+        const s = sim(cand, t.norm);
+        if (s >= 0.8) score = s;
+        else if (s >= 0.55 && koeln(cand.replace(/ /g, '')) === t.code) score = 0.75;
+      }
+      if (score && (!best || score > best.score)) best = { score, t, n };
+    }
+    if (best) {
+      repl.push({ s: words[i].s, e: words[i + best.n - 1].e, to: best.t.text });
+      i += best.n - 1;
+    }
+  }
+  for (const r of repl.reverse()) text = text.slice(0, r.s) + r.to + text.slice(r.e);
+  return text;
+}
+
+
+const termsText = () => $('terms').value;
+$('terms').value = store.get('terms', '');
+parseTerms();
+$('terms').addEventListener('input', () => { store.set('terms', $('terms').value); parseTerms(); });
+$('addFix').onclick = () => {
+  const ta = $('text');
+  let wrong = ta.value.slice(ta.selectionStart, ta.selectionEnd).trim();
+  if (!wrong) wrong = (prompt('Welches Wort wird falsch erkannt? (so wie es im Text steht)') || '').trim();
+  if (!wrong) return;
+  const right = (prompt(`Wie soll „${wrong}“ richtig geschrieben werden?`, wrong) || '').trim();
+  if (!right) return;
+  const t = $('terms');
+  t.value = (t.value.trim() ? t.value.replace(/\s*$/, '\n') : '') + (right === wrong ? right : `${wrong} => ${right}`);
+  store.set('terms', t.value); parseTerms();
+  $('glossDetails').open = true;
+  ta.value = applyTerms(ta.value);   // gleich im aktuellen Text korrigieren
+  copyNow();
+};
 
 // ---------------------------------------------------------------- Ergebnisse (in Reihenfolge, wortgetreu)
 let nextId = 1, nextToInsert = 1;
@@ -235,7 +383,7 @@ const usable = (t) => { t = (t || '').replace(/\s+/g, ' ').trim(); return JUNK.s
 function onResult(r) {
   if (r.live) {
     liveBusy = false;
-    if (r.id === -segNo - 1 && !r.error && recording) $('live').textContent = usable(r.text);
+    if (r.id === -segNo - 1 && !r.error && recording) $('live').textContent = applyTerms(usable(r.text));
     return;
   }
   if (!pending.has(r.id)) return;
@@ -243,7 +391,7 @@ function onResult(r) {
   while (pending.has(nextToInsert) && pending.get(nextToInsert)) {
     const res = pending.get(nextToInsert);
     pending.delete(nextToInsert); nextToInsert++;
-    const t = res.error ? '' : usable(res.text);
+    const t = res.error ? '' : applyTerms(usable(res.text));
     if (t) {
       const ta = $('text');
       ta.value += (ta.value && !/\s$/.test(ta.value) ? ' ' : '') + t;

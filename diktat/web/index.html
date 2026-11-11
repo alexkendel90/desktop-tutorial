@@ -52,6 +52,8 @@
     font: 18px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #terms { min-height: 130px; font: 15px/1.5 ui-monospace, Consolas, monospace; margin-top: 4px; }
+  code { font-size: .9em; }
   #live { color: var(--muted); font-style: italic; min-height: 1.6em; margin-top: 8px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
   .spacer { flex: 1; }
@@ -102,6 +104,19 @@
       <span class="spacer"></span>
       <span class="small" id="modelInfo"></span>
     </div>
+  </section>
+
+  <section class="panel">
+    <details id="glossDetails">
+      <summary>📚 Glossar – eigene Wörter &amp; Korrekturen</summary>
+      <p class="small">Ein Wort pro Zeile. Diese Wörter werden bevorzugt erkannt, und ähnlich klingende Fehler werden automatisch korrigiert.
+        Mit <code>falsch =&gt; richtig</code> wird immer ersetzt. Schnell geht es so: Wort im Text markieren und „Korrektur hinzufügen“ klicken.</p>
+      <textarea id="terms" spellcheck="false" placeholder="Kubernetes
+Dr. Schwarzwälder
+Kuba Netz => Kubernetes
+oh ka er, okay ar => OKR"></textarea>
+      <div class="row"><button id="addFix">➕ Korrektur hinzufügen</button><span class="small">Wird automatisch gespeichert.</span></div>
+    </details>
   </section>
 
   <section class="panel">
