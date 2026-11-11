@@ -12,7 +12,7 @@ let W = null;      // { model, processor, tokenizer } für Whisper
 let pk = null;     // ParakeetModel
 
 // ---------------- Whisper ----------------
-async function loadWhisper(modelId) {
+async function loadWhisper(modelId, opts = {}) {
   post({ type: 'phase', text: 'Lade Programmbibliothek …' });
   const T = await import('./lib/transformers/transformers.min.js');
   const onnx = T.env.backends.onnx;
@@ -31,7 +31,7 @@ async function loadWhisper(modelId) {
     const [processor, tokenizer, model] = await Promise.all([
       T.AutoProcessor.from_pretrained(modelId, { progress_callback }),
       T.AutoTokenizer.from_pretrained(modelId, { progress_callback }),
-      T.WhisperForConditionalGeneration.from_pretrained(modelId, { dtype: 'q8', device: 'wasm', progress_callback }),
+      T.WhisperForConditionalGeneration.from_pretrained(modelId, { dtype: opts.dtype || 'q8', device: opts.device || 'wasm', progress_callback }),
     ]);
     W = { processor, tokenizer, model };
   } catch (e) {
@@ -141,7 +141,7 @@ self.onmessage = async (ev) => {
     if (msg.type === 'load') {
       if (loadedModel !== msg.model) {
         if (msg.model.startsWith('parakeet:')) await loadParakeet(msg.model);
-        else await loadWhisper(msg.model);
+        else await loadWhisper(msg.model, msg.opts);
         loadedModel = msg.model;
       }
       post({ type: 'ready', model: msg.model, threads: THREADS });
