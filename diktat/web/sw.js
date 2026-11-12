@@ -2,9 +2,9 @@
 // 1. macht die App offline verfügbar (App-Dateien im Cache; Modelle liegen in IndexedDB),
 // 2. setzt COOP/COEP-Header, damit der Browser mehrere Prozessorkerne freigibt (crossOriginIsolated),
 //    auch auf Hosts, die diese Header nicht selbst senden (z. B. GitHub Pages).
-const VERSION = 'diktat-web-v1';
+const VERSION = 'diktat-web-v2';
 const SHELL = [
-  './', './index.html', './app.js', './store.js', './asr-worker.js', './llm-worker.js',
+  './', './index.html', './einfach.js', './voll.html', './app.js', './store.js', './asr-worker.js', './llm-worker.js',
   './manifest.webmanifest', './icon.svg',
   './lib/transformers/transformers.min.js',
   './lib/transformers/ort-wasm-simd-threaded.jsep.mjs',
